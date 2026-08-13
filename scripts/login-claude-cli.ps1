@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Logger inn Claude Code CLI slik at Auto-XSALE kan kjore uovervaket.
 

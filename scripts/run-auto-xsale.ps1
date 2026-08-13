@@ -1,4 +1,4 @@
-param(
+﻿param(
     # 0 = ingen budsjettgrense. --max-turns finnes ikke lenger i Claude Code 2.x;
     # --max-budget-usd er naermeste tilsvarende sikring mot rundgang.
     [double] $MaxBudgetUsd = 0

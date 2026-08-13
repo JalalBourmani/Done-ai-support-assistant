@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Lagrer Claude Code OAuth-token DPAPI-kryptert for bruk i Auto-XSALE.
 

@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 #  Done.ai Support Assistant — kontroll
 # =============================================================================
 #  Kjor denne nar noe ikke virker, og ta med utdataen nar du ber om hjelp.
@@ -60,6 +60,21 @@ Sjekk "config.env" {
     }
     if ($mangler) { throw "Mangler verdier: $($mangler -join ', '). Kjor install.ps1 og oppsett.ps1." }
     "XSALE_URL=$env:XSALE_URL"
+}
+Sjekk "Tegnkoding i skriptene" {
+    # Windows PowerShell 5.1 leser en .ps1 uten UTF-8 BOM som Windows-1252, og da
+    # blir norske tegn mojibake i alt utdata. Fanges her fordi det ellers bare
+    # ser ut som en skrivefeil.
+    $uten = @()
+    foreach ($p in (Get-ChildItem -LiteralPath (Join-Path $script:KitRoot "scripts") -Filter *.ps1)) {
+        $bytes = [IO.File]::ReadAllBytes($p.FullName)
+        $harBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+        if (-not $harBom) { $uten += $p.Name }
+    }
+    if ($uten.Count -gt 0) {
+        return ("ADVARSEL Disse mangler UTF-8 BOM og vil vise norske tegn feil: " + ($uten -join ", "))
+    }
+    "alle .ps1 har UTF-8 BOM"
 }
 Sjekk "Saksmappe utenfor repoet" {
     $d = Get-AutoXsaleDir

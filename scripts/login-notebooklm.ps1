@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Logger inn mot NotebookLM med din egen Google-konto.
 

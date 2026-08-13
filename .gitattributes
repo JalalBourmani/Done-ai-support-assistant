@@ -3,6 +3,11 @@
 * text=auto
 
 # PowerShell kjores pa Windows. CRLF unngar rare feil i her-strenger.
+#
+# VIKTIG: .ps1-filene er lagret som UTF-8 MED BOM, og det skal de forbli.
+# Windows PowerShell 5.1 leser en .ps1 uten BOM som Windows-1252, og da blir
+# norske tegn mojibake i alt konsollutdata - "foreløpig" ble "forelÃ¸pig".
+# Ikke fjern BOM-en, og ikke la et redigeringsprogram lagre uten den.
 *.ps1 text eol=crlf
 *.psm1 text eol=crlf
 *.cmd text eol=crlf
