@@ -206,6 +206,37 @@ if (-not (Test-Path -LiteralPath $projectClaude)) {
     Write-Host "  CLAUDE.md finnes alt og beholdes"
 }
 
+# --- Saksoversikt (valgfri) -------------------------------------------------
+# Appen leser AUTO_XSALE_DIR fra app\.env.local, ikke fra config.env. Uten fila
+# nekter den a starte - med vilje, siden en tilbakefallsverdi som peker pa en
+# mappe du ikke har gir en tom sakliste som ikke er til a skille fra en rolig
+# uke. Men installeren vet alt stien, sa den skriver fila selv.
+$appDir = Join-Path $script:KitRoot "app"
+if (Test-Path -LiteralPath $appDir) {
+    Trinn "Saksoversikt (valgfri)"
+    $appEnv = Join-Path $appDir ".env.local"
+    if (Test-Path -LiteralPath $appEnv) {
+        Write-Host "  app\.env.local finnes alt og beholdes"
+    } else {
+        # Uten anforselstegn tolkes verdien bokstavelig av dotenv, sa
+        # Windows-stier med bakstrek trenger ingen escaping.
+        Set-Content -LiteralPath $appEnv -Encoding utf8 -Value @(
+            "# Opprettet av scripts\install.ps1. Peker pa saksmappen din.",
+            "AUTO_XSALE_DIR=$AutoXsaleDir"
+        )
+        Write-Host "  Opprettet app\.env.local -> $AutoXsaleDir"
+    }
+
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($node) {
+        $nodeVer = (& $node.Source --version 2>&1 | Out-String).Trim()
+        Write-Host "  Node $nodeVer funnet. Kjor 'cd app; npm install' nar du vil bruke oversikten."
+    } else {
+        Write-Host "  Node.js er ikke installert. Saksoversikten er valgfri og kan hoppes over." -ForegroundColor DarkGray
+    }
+}
+
 # --- Ferdig -----------------------------------------------------------------
 Write-Host ""
 Write-Host ("=" * 70) -ForegroundColor Green
@@ -220,4 +251,7 @@ Write-Host "  4. .\scripts\login-notebooklm.ps1        nar du har fatt invitasjo
 Write-Host "  5. .\scripts\verify.ps1                  kontroller at alt virker"
 Write-Host ""
 Write-Host "Apne deretter $ProjectRoot i Claude Code." -ForegroundColor Gray
+Write-Host ""
+Write-Host "Valgfritt: saksoversikt i nettleser" -ForegroundColor Gray
+Write-Host "  cd app; npm install; npm run dev   ->  http://localhost:4317" -ForegroundColor DarkGray
 Write-Host ""
