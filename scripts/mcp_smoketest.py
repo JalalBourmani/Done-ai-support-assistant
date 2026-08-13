@@ -32,10 +32,16 @@ def main():
         os.path.join(KIT_ROOT, "scripts", "run-mcp.ps1"), "-Server", server,
     ]
 
+    # pydantic_settings gir en IncompleteFieldDefinitionWarning via mcp-pakken.
+    # Den er harmlos, men fyller stderr og far en fungerende server til a se
+    # odelagt ut i verify-utdataen.
+    miljo = dict(os.environ)
+    miljo.setdefault("PYTHONWARNINGS", "ignore")
+
     try:
         proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
+            text=True, encoding="utf-8", errors="replace", bufsize=1, env=miljo,
         )
     except Exception as e:
         print("FEIL: klarte ikke starte run-mcp.ps1: %s" % e)

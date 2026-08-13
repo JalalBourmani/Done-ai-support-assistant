@@ -19,7 +19,9 @@ fleste punktene har du sannsynligvis allerede.
 | 5 | Node.js 18 eller nyere — **bare** hvis du vil ha saksoversikten i nettleser | `node --version` |
 | 6 | Egen XSALE-bruker | Du har den alt |
 | 7 | Egen MySQL-bruker på `ws.tellix.no` (phpMyAdmin) | Du har den alt |
-| 8 | Invitasjon til NotebookLM-prosjektet | **Må bes om — se under** |
+| 8 | **Kontornett eller VPN** — for MySQL-delen | Se under |
+| 9 | Invitasjon til NotebookLM-prosjektet | **Må bes om — se under** |
+| 10 | Tilgang til GitHub-repoet | **Må bes om — se under** |
 
 ### Rask sjekk
 
@@ -34,15 +36,39 @@ Mangler noen av de tre andre, ordne det først.
 
 ---
 
-## Det ene du må be om
+## To ting du må be om
 
-**NotebookLM-tilgang.** Kunnskapsbasen med Confluence-artiklene ligger i et delt NotebookLM-prosjekt.
-Du får ikke tilgang automatisk.
+Gjør begge **før** du starter installasjonen, så du ikke må vente midt i den.
 
+**1. Tilgang til GitHub-repoet.** Repoet er privat. Send Jalal GitHub-brukernavnet ditt, og godta
+invitasjonen som kommer på e-post. Uten den feiler `git clone` med `Repository not found` — en melding
+som ikke antyder at problemet er tilgang.
+
+**2. NotebookLM-tilgang.** Kunnskapsbasen med Confluence-artiklene ligger i et delt NotebookLM-prosjekt.
 Send Jalal **Google-kontoen du bruker på jobb**, og be om invitasjon til «Amendo Knowledge base».
 Uten den vil `notebooklm-mcp` feile ved innlogging, men de to andre serverne virker likevel.
 
-Gjør dette **før** du starter installasjonen, så du ikke må vente midt i den.
+---
+
+## 🔴 Nettverk — les dette før du feilsøker et passord
+
+**`ws.tellix.no` slipper bare inn åpnede IP-adresser.** Sitter du hjemme uten VPN, feiler
+MySQL-innloggingen selv med helt riktig brukernavn og passord.
+
+Og feilmeldingen hjelper deg ikke: phpMyAdmin svarer
+
+```
+Authentication Error: Login to phpMyAdmin failed. Please check DB_USER and DB_PASSWORD.
+```
+
+…uansett årsak. Får du den, **sjekk nettverket før du sjekker passordet.**
+
+Dette gjelder bare MySQL-delen. XSALE og NotebookLM virker hvor som helst, så du kan fullføre resten
+av installasjonen og kjøre dette senere:
+
+```powershell
+.\scripts\oppsett.ps1 -Bare mysql
+```
 
 ---
 

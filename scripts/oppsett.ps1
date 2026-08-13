@@ -94,7 +94,15 @@ function Test-Innlogging([string] $tjeneste, [hashtable] $miljo, [string] $pytho
         $tmp = [IO.Path]::GetTempFileName() + ".py"
         Set-Content -LiteralPath $tmp -Value $pythonKode -Encoding utf8
         Write-Host "  Tester innlogging mot $tjeneste ..." -NoNewline
-        $ut = (& $script:VenvPython $tmp | Out-String).Trim()
+        # -W ignore: pydantic_settings gir en IncompleteFieldDefinitionWarning via
+        # mcp-pakken. Den er harmlos, men fyller skjermen og far et fungerende
+        # oppsett til a se odelagt ut for den som installerer.
+        $ut = (& $script:VenvPython -W ignore $tmp 2>&1 | Out-String).Trim()
+        # Fjern eventuelle gjenvaerende advarselslinjer, sa bare vart eget svar star igjen.
+        $ut = ($ut -split "`n" | Where-Object {
+            $_ -notmatch 'Warning:|warnings\.warn|^\s*$|site-packages'
+        }) -join "`n"
+        $ut = $ut.Trim()
         if ($ut -like "OK*") {
             Write-Host " bekreftet" -ForegroundColor Green
             if ($ut.Length -gt 2) { Write-Host "    $($ut.Substring(2).Trim())" -ForegroundColor DarkGray }
@@ -227,8 +235,22 @@ except Exception as e:
 "@
         $klar = $null
         if (-not $ok -and $forsok -lt 3) {
-            Write-Host "  Prov igjen. Har du egen bruker pa ws.tellix.no?" -ForegroundColor Yellow
+            # Feilmeldingen fra phpMyAdmin sier "check DB_USER and DB_PASSWORD"
+            # uansett arsak. Den vanligste arsaken er ikke feil passord, men at
+            # IP-adressen din ikke er apnet for tilgang - og da leter man
+            # forgjeves etter en skrivefeil i passordet.
+            Write-Host ""
+            Write-Host "  To ting a sjekke, i denne rekkefolgen:" -ForegroundColor Yellow
+            Write-Host "   1. Er du pa kontornettet eller VPN?" -ForegroundColor Yellow
+            Write-Host "      ws.tellix.no slipper bare inn apnede IP-adresser. Hjemmefra uten VPN" -ForegroundColor DarkYellow
+            Write-Host "      feiler innloggingen selv med helt riktig passord." -ForegroundColor DarkYellow
+            Write-Host "   2. Har du egen bruker pa ws.tellix.no, og er passordet riktig?" -ForegroundColor Yellow
+            Write-Host ""
         }
+    }
+    if (-not $ok) {
+        Write-Host "  Du kan hoppe over dette og fortsette. XSALE og NotebookLM virker uten." -ForegroundColor DarkGray
+        Write-Host "  Kjor .\scripts\oppsett.ps1 -Bare mysql nar du er pa riktig nett." -ForegroundColor DarkGray
     }
     if ($ok) {
         Lagre-Legitimasjon "mysql.xml" $dbBruker $dbPassord
