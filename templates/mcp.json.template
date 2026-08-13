@@ -1,0 +1,43 @@
+{
+  "mcpServers": {
+    "xsale-crm": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "__KIT_ROOT__\\scripts\\run-mcp.ps1",
+        "-Server",
+        "xsale"
+      ]
+    },
+    "mysql-query-server": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "__KIT_ROOT__\\scripts\\run-mcp.ps1",
+        "-Server",
+        "mysql"
+      ]
+    },
+    "notebooklm-mcp": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "__KIT_ROOT__\\scripts\\run-mcp.ps1",
+        "-Server",
+        "notebooklm"
+      ]
+    }
+  }
+}

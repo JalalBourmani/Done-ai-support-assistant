@@ -1,0 +1,13 @@
+{
+  "serialNumber": 41234,
+  "subject": "Kassen mister forbindelse til terminalen",
+  "status": "ASSIGNED",
+  "priority": "NORMAL",
+  "origin": "PHONE",
+  "created": "2026-03-04 09:12:33",
+  "updated": "2026-03-04 14:48:07",
+  "customer": {
+    "name": "NORDVIK SPORT AS",
+    "serialNumber": 999999
+  }
+}

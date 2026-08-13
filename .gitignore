@@ -1,0 +1,94 @@
+# =============================================================================
+#  Legitimasjon — skal ALDRI committes
+# =============================================================================
+# DPAPI-krypterte filer. De kan ikke dekrypteres av andre, men de har ingenting
+# i et delt repo å gjøre uansett.
+secrets/
+*.xml.bak
+
+# Alt som kan inneholde brukernavn, passord eller tokens i klartekst.
+.env
+.env.local
+.env.*.local
+*/.env
+servers/*/.env
+config.env
+!config.env.example
+
+# =============================================================================
+#  Kundedata — skal ALDRI committes
+# =============================================================================
+# Saksmappene ligger normalt utenfor repoet (se config.env: AUTO_XSALE_DIR).
+# Disse reglene er et ekstra sikkerhetsnett hvis noen likevel legger dem her.
+# Merk at examples/ er unntatt — det innholdet er oppdiktet.
+Auto-XSALE/
+auto-xsale/
+case_raw.json
+troubleshooting.md
+draft_reply.md
+db_findings.md
+internal_checklist.md
+!examples/**
+
+# Bilder og vedlegg fra kunder
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.pdf
+!docs/**/*.png
+
+# =============================================================================
+#  Forsvar i dybden — mønstre, ikke bare kjente filnavn
+# =============================================================================
+# HAR-fangster inneholder sesjonsinfokapsler og Authorization-headere. En
+# feilsøkingsfangst fra XSALE er like sensitiv som passordet selv.
+*.har
+
+# Nøkler og sertifikater
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa*
+*credential*.xml
+*secret*.json
+
+# Sikkerhetskopier lagd under redigering. En config.env.bak er ikke dekket av
+# regelen for config.env.
+*.bak
+*.orig
+*.tmp
+*~
+
+# =============================================================================
+#  Generert og lokalt
+# =============================================================================
+# mcp.json genereres av install.ps1 med maskinens egne stier.
+generated/
+.mcp.json
+CLAUDE.md
+logs/
+*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+tsconfig.tsbuildinfo
+npm-debug.log*
+
+# Windows / editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
