@@ -65,12 +65,42 @@ Trinn "Avhengigheter"
 if (-not $SkipPackageUpgrade) {
     & $script:VenvPython -m pip install --upgrade pip --quiet
 }
-& $script:VenvPython -m pip install --quiet `
-    -r (Join-Path $script:ServersRoot "xsale\requirements.txt") `
-    -r (Join-Path $script:ServersRoot "mysql\requirements.txt") `
-    notebooklm-mcp-cli
-if ($LASTEXITCODE -ne 0) { throw "pip install feilet." }
-Write-Host "  Ferdig"
+# Lockfila brukes nar den finnes. requirements.txt pinner bare de tre direkte
+# avhengighetene, og det holder ikke: mcp tillater et spenn av transitive
+# pakker, og de driftet malbart pa under en uke. Uten lock far hver kollega et
+# litt annet oppsett avhengig av installasjonsdato.
+$lockPath = Join-Path $script:KitRoot "requirements.lock.txt"
+$reqPath = Join-Path $script:KitRoot "requirements.txt"
+if (Test-Path -LiteralPath $lockPath) {
+    $bruktFil = $lockPath
+    Write-Host "  Bruker last liste: requirements.lock.txt"
+} elseif (Test-Path -LiteralPath $reqPath) {
+    $bruktFil = $reqPath
+    Write-Warning "  requirements.lock.txt mangler. Bruker requirements.txt - transitive versjoner kan avvike fra andres."
+} else {
+    throw "Fant verken requirements.lock.txt eller requirements.txt i $($script:KitRoot)."
+}
+& $script:VenvPython -m pip install --quiet -r $bruktFil
+if ($LASTEXITCODE -ne 0) {
+    throw ("pip install feilet. Er du bak en proxy, eller mangler du nett?`n" +
+        "Kjor uten --quiet for a se hva som skjer:`n" +
+        "  .\.venv\Scripts\python.exe -m pip install -r $(Split-Path -Leaf $bruktFil)")
+}
+
+# Kontroller at de tre pakkene faktisk kan importeres og at binaerene finnes.
+# pip kan avslutte med 0 selv om noe ble hoppet over.
+$sjekk = (& $script:VenvPython -W ignore -c `
+    "import mcp, requests; print(mcp.__name__, requests.__version__)" 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Pakkene ble installert, men kan ikke importeres: $sjekk" }
+
+$nlm = Join-Path $script:VenvRoot "Scripts\nlm.exe"
+$nlmMcp = Join-Path $script:VenvRoot "Scripts\notebooklm-mcp.exe"
+foreach ($e in @($nlm, $nlmMcp)) {
+    if (-not (Test-Path -LiteralPath $e)) {
+        Write-Warning "  Fant ikke $(Split-Path -Leaf $e). NotebookLM vil ikke virke."
+    }
+}
+Write-Host "  Ferdig  ($sjekk)"
 
 # --- Mapper -----------------------------------------------------------------
 Trinn "Mapper"

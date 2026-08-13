@@ -53,11 +53,12 @@ kommando og ikke kan inneholde et andre statement.
 
 ## Installasjon
 
-1. Sørg for at Python 3 er installert på din maskin.
-2. Installer nødvendige avhengigheter i denne mappen:
-   ```bash
-   pip install -r requirements.txt
-   ```
+Avhengighetene installeres av settet, fra den pinnede `requirements.txt` i
+repo-roten — ikke per server:
+
+```powershell
+.\scripts\install.ps1
+```
 
 ---
 

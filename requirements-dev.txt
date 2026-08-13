@@ -1,0 +1,11 @@
+# Bare nodvendig for a kjore testene. Ikke for a bruke settet.
+#
+#   .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+#   .\.venv\Scripts\python.exe -m pytest servers\mysql\test_mcp_server.py -q
+#
+# Holdt utenfor requirements.txt fordi en kollega som bare skal bruke verktoyene
+# ikke trenger et testrammeverk installert.
+
+-r requirements.txt
+
+pytest==8.4.2

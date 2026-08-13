@@ -1,0 +1,31 @@
+# =============================================================================
+#  Done.ai Support Assistant — Python-avhengigheter
+# =============================================================================
+#
+#  Versjonene er PINNET med vilje.
+#
+#  Uten pinning får hver kollega det som er nyest den dagen de installerer. Da
+#  kan settet virke for fire personer og feile for den femte, uten at noen kan
+#  forklare hvorfor. Det er den vanskeligste feiltypen å hjelpe med på avstand.
+#
+#  Versjonene under er verifisert i drift, ikke valgt fra en changelog.
+#
+#  Skal du oppgradere:
+#    1. Endre versjonen her
+#    2. .\scripts\install.ps1
+#    3. .\scripts\verify.ps1        <- starter alle tre serverne
+#    4. Virker det, commit endringen. Virker det ikke, sett den tilbake.
+#
+#  Oppgrader én pakke om gangen. Da vet du hvilken som brakk noe.
+# =============================================================================
+
+# MCP-protokollen. Brukes av begge serverne i servers/.
+mcp==1.29.0
+
+# HTTP-klienten begge serverne bruker. XSALE-serveren snakker med
+# ExtJSON-API-et, MySQL-serveren med phpMyAdmin.
+requests==2.34.2
+
+# NotebookLM-serveren. Leverer bade `nlm.exe` (innlogging) og
+# `notebooklm-mcp.exe` (selve MCP-serveren) i .venv\Scripts\.
+notebooklm-mcp-cli==0.9.4
