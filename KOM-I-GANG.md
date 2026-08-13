@@ -154,7 +154,27 @@ din. Den sender ingen e-post og lukker ingen saker.
 
 Hvilke saker som plukkes bestemmes av **din innlogging**, ikke av noe navn i prompten.
 
-Vil du sette den opp til å kjøre automatisk, se [routine/OPPSETT.md](routine/OPPSETT.md).
+Får du dette svaret, er det ikke en feil:
+
+```
+Køen er tom: ingen XSALE-saker med status Ny eller Under behandling som ikke er behandlet.
+```
+
+Det betyr at du ikke har ubehandlede saker med status `NEW` eller `ASSIGNED` akkurat nå. Køen tar
+bevisst bare saker den ikke har sett før.
+
+### Rutiner må du lage selv
+
+**Du finner ingen ferdig rutine etter installasjonen, og det er riktig.**
+
+Claude Codes rutiner er lokal brukertilstand — de lagres i `~\.claude\scheduled-tasks\` på din egen
+maskin, ikke i dette repoet. De kan ikke deles gjennom Git, og en restart av Claude Code får dem ikke
+til å dukke opp.
+
+Har du sett en kollega ha en rutine for dette, må du opprette din egen. Det tar et minutt, og teksten
+du skal lime inn ligger klar i [routine/OPPSETT.md](routine/OPPSETT.md).
+
+Automatisk kjøring er forøvrig **valgfritt**. Mange kjører assistenten manuelt når de trenger den.
 
 ## Saksoversikt i nettleser
 

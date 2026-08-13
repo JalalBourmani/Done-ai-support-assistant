@@ -3,6 +3,14 @@
 Saksassistenten kan kjøre av seg selv med jevne mellomrom. Det er **valgfritt** — mange kjører den
 manuelt når de trenger den, og det er helt greit.
 
+> ### Du har ingen rutine etter installasjonen
+>
+> Det er ikke en feil, og en restart av Claude Code hjelper ikke.
+>
+> Rutiner er **lokal brukertilstand**. De lagres i `~\.claude\scheduled-tasks\<id>\SKILL.md` på din
+> egen maskin, og følger derfor ikke med repoet. Har en kollega en rutine for dette, kan den ikke
+> kopieres eller deles — du lager din egen etter oppskriften under.
+
 > **Kjør den manuelt et par ganger først.** Se hva den skriver, og om utkastene er nyttige for
 > saksmengden din, før du setter den til å gå automatisk.
 >
