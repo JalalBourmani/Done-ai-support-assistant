@@ -109,7 +109,7 @@ if (-not $AutoXsaleDir) {
 }
 # Saksmappen ma ligge utenfor repoet. Ellers kan kundedata havne i Git.
 $kitFull = (Resolve-Path -LiteralPath $script:KitRoot).Path
-if ($AutoXsaleDir.StartsWith($kitFull, [StringComparison]::OrdinalIgnoreCase)) {
+if (Test-PathInside -Child $AutoXsaleDir -Parent $kitFull) {
     throw ("AUTO_XSALE_DIR ligger inne i repoet:`n  $AutoXsaleDir`n" +
         "Saksmapper med kundedata skal ligge utenfor. Velg en annen mappe, " +
         "for eksempel $(Join-Path $env:USERPROFILE 'Documents\Auto-XSALE').")
@@ -163,22 +163,15 @@ if (-not (Test-Path -LiteralPath $projectMcp)) {
 Trinn "Arbeidsinstruksjoner"
 $projectClaude = Join-Path $ProjectRoot "CLAUDE.md"
 if (-not (Test-Path -LiteralPath $projectClaude)) {
+    # Fornavnet er ikke oppgitt enna - oppsett.ps1 sporr om det etterpa og
+    # skriver denne fila om da. Windows-brukernavnet er bare et midlertidig
+    # utgangspunkt.
     $navn = if ($env:USER_NAME) { $env:USER_NAME } else { $env:USERNAME }
     $notebook = if ($env:NOTEBOOK_NAME) { $env:NOTEBOOK_NAME } else { "Amendo Knowledge base" }
 
-    $mal = Get-Content -Raw -LiteralPath (Join-Path $script:KitRoot "templates\CLAUDE.md.template")
-    $mal = $mal.
-        Replace("__USER_NAME__", $navn).
-        Replace("__NOTEBOOK_NAME__", $notebook).
-        Replace("__AUTO_XSALE_DIR__", $AutoXsaleDir)
-
-    # En glemt plassholder skal stoppe installasjonen, ikke havne i teksten
-    # modellen leser som instruks.
-    $rest = [regex]::Matches($mal, '__[A-Z_]+__') | ForEach-Object { $_.Value } | Sort-Object -Unique
-    if ($rest) { throw "CLAUDE.md-malen har uerstattede plassholdere: $($rest -join ', ')" }
-
-    Set-Content -LiteralPath $projectClaude -Value $mal -Encoding utf8
-    Write-Host "  Opprettet $projectClaude (for $navn)"
+    Write-ClaudeMd -Destinasjon $projectClaude -Navn $navn -Notebook $notebook `
+        -AutoXsaleDir $AutoXsaleDir
+    Write-Host "  Opprettet $projectClaude (foreløpig navn: $navn)"
 } else {
     Write-Host "  CLAUDE.md finnes alt og beholdes"
 }

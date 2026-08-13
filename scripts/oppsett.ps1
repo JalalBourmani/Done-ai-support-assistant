@@ -138,6 +138,24 @@ if (Skal-Kjore "navn") {
     $fornavn = Les-Tekst "Fornavn" $env:USERNAME
     Sett-Config "USER_NAME" $fornavn
     Write-Host "  Hei, $fornavn." -ForegroundColor Green
+
+    # install.ps1 skrev CLAUDE.md for navnet var kjent, og hopper over fila hvis
+    # den finnes. Uten denne omskrivingen ville navnet du oppgir her aldri blitt
+    # brukt - fila ville statt med Windows-brukernavnet.
+    $projectClaude = Join-Path (Get-ProjectRoot) "CLAUDE.md"
+    if (Test-Path -LiteralPath $projectClaude) {
+        try {
+            Write-ClaudeMd `
+                -Destinasjon $projectClaude `
+                -Navn $fornavn `
+                -Notebook $(if ($env:NOTEBOOK_NAME) { $env:NOTEBOOK_NAME } else { "Amendo Knowledge base" }) `
+                -AutoXsaleDir (Get-AutoXsaleDir)
+            Write-Host "  Oppdaterte CLAUDE.md med navnet ditt." -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Warning "  Klarte ikke oppdatere CLAUDE.md: $($_.Exception.Message)"
+        }
+    }
 }
 
 # --- 2. XSALE ---------------------------------------------------------------

@@ -65,6 +65,55 @@ function Get-ProjectRoot {
     return $root
 }
 
+function Test-PathInside {
+    <#
+        Ligger $Child inne i $Parent?
+
+        En ren StartsWith-sammenligning respekterer ikke mappegrenser:
+        "C:\Temp\kit-test-saker" starter med "C:\Temp\kit-test", men ligger ikke
+        inni den. Skilletegnet ma vaere med i sammenligningen.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Child,
+        [Parameter(Mandatory)] [string] $Parent
+    )
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $c = $Child.TrimEnd($sep, [IO.Path]::AltDirectorySeparatorChar) + $sep
+    $p = $Parent.TrimEnd($sep, [IO.Path]::AltDirectorySeparatorChar) + $sep
+    return $c.StartsWith($p, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Write-ClaudeMd {
+    <#
+        Genererer CLAUDE.md fra malen med brukerens egne verdier.
+
+        Ligger her fordi to skript trenger den: install.ps1 lager fila forst, og
+        oppsett.ps1 skriver den om nar fornavnet er kjent. Uten det siste ville
+        fila blitt staende med Windows-brukernavnet, siden install kjorer for
+        brukeren har oppgitt noe navn.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Destinasjon,
+        [Parameter(Mandatory)] [string] $Navn,
+        [Parameter(Mandatory)] [string] $Notebook,
+        [Parameter(Mandatory)] [string] $AutoXsaleDir
+    )
+
+    $malPath = Join-Path $script:KitRoot "templates\CLAUDE.md.template"
+    $mal = Get-Content -Raw -LiteralPath $malPath
+    $mal = $mal.
+        Replace("__USER_NAME__", $Navn).
+        Replace("__NOTEBOOK_NAME__", $Notebook).
+        Replace("__AUTO_XSALE_DIR__", $AutoXsaleDir)
+
+    # En glemt plassholder skal stoppe her, ikke havne i teksten modellen leser
+    # som instruks.
+    $rest = [regex]::Matches($mal, '__[A-Z_]+__') | ForEach-Object { $_.Value } | Sort-Object -Unique
+    if ($rest) { throw "CLAUDE.md-malen har uerstattede plassholdere: $($rest -join ', ')" }
+
+    Set-Content -LiteralPath $Destinasjon -Value $mal -Encoding utf8
+}
+
 function Resolve-ClaudeCli {
     <#
         Finner Claude Code CLI. Desktop-appen legger ikke 'claude' i PATH, men

@@ -65,7 +65,7 @@ Sjekk "Saksmappe utenfor repoet" {
     $d = Get-AutoXsaleDir
     if (-not (Test-Path -LiteralPath $d)) { throw "Finnes ikke: $d" }
     $kit = (Resolve-Path -LiteralPath $script:KitRoot).Path
-    if ((Resolve-Path -LiteralPath $d).Path.StartsWith($kit, [StringComparison]::OrdinalIgnoreCase)) {
+    if (Test-PathInside -Child (Resolve-Path -LiteralPath $d).Path -Parent $kit) {
         throw "Saksmappen ligger INNE i repoet: $d. Kundedata kan havne i Git."
     }
     $d
