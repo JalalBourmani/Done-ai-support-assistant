@@ -37,23 +37,67 @@ ingen lukkede saker.
 
 Kjører mens Claude Code er åpent. Enklest, og du ser resultatet med en gang.
 
+### Raskeste vei: la agenten sette den opp
+
+Åpne Claude Code i repo-mappen og lim inn dette:
+
+```
+Sett opp en rutine som kjører saksassistenten i dette repoet.
+
+Rutinen skal ha denne instruksjonen, ordrett:
+
+---
+Kjør .\scripts\run-auto-xsale.ps1 fra repo-roten. Ingenting annet.
+
+Rapporter deretter kort:
+- hvilket saksnummer som ble behandlet, og for hvilken kunde
+- hvilke filer som ble opprettet
+- stien til loggfila
+- eventuelle punkter skriptet ba brukeren kontrollere manuelt
+
+Regler:
+- Ikke send e-post. Ikke lukk, endre eller kommenter saker i XSALE.
+- Ikke rediger svarutkastene skriptet lager. De skal leses av et menneske først.
+- Svarer skriptet at køen er tom, er det riktig oppførsel. Rapporter det i én
+  setning og avslutt. Ikke let etter annet arbeid.
+- Feiler skriptet, rapporter feilmeldingen og stopp. Ikke prøv på nytt, og ikke
+  forsøk å reparere noe.
+---
+
+La intervallet stå tomt, slik at jeg starter den manuelt til jeg har sett hva den gjør.
+Bekreft hva du satte opp når du er ferdig.
+```
+
+Klarer ikke agenten å opprette rutiner, gjør du det manuelt — se under. Teksten er den samme.
+
+### Manuelt i Routines-panelet
+
 1. Åpne Claude Code i repo-mappen
-2. Åpne **Routines**-panelet
-3. Lag en ny rutine med denne instruksjonen:
+2. Åpne **Routines**-panelet, lag en ny rutine
+3. Lim inn instruksjonen mellom `---`-linjene over
+4. **La intervallet stå tomt** hvis du bare vil starte den manuelt
 
-```
-Kjør .\scripts\run-auto-xsale.ps1 fra repo-mappen.
-Rapporter kort hvilken sak som ble behandlet og hvilke filer som ble laget.
-Ikke gjør noe annet.
-```
+### Hvorfor instruksjonen er så streng
 
-4. **La intervallet stå tomt** hvis du bare vil kunne starte den manuelt. Setter du et intervall,
-   husk at den bare kjører når Claude Code faktisk er åpent.
+Hver regel dekker noe som faktisk kan gå galt i en uovervåket kjøring:
+
+| Regel | Hva den hindrer |
+|---|---|
+| Ingenting annet enn skriptet | At agenten «hjelper til» med å sende utkastet eller lukke saken |
+| Ikke rediger utkastene | At et menneske aldri får lest det som går til kunden |
+| Tom kø er riktig | At agenten leter etter arbeid som ikke finnes |
+| Ikke prøv på nytt | At en feil gjentas i løkke og spiser budsjett |
+
+Skriptet har egne vakter — hvitelisten uten skrivende XSALE-verktøy, og stoppen hvis noen legger inn
+ett. Reglene over er laget for **agenten rundt** skriptet, som ikke er begrenset på samme måte.
 
 ### Sett den manuell først
 
-Det er en god vane å la den være manuell de første dagene. Da bestemmer du når den går, og du
-oppdager tidlig hvis noe i saksmengden din gjør at utkastene bommer.
+La den være manuell de første dagene. Da bestemmer du når den går, og du oppdager tidlig hvis noe i
+saksmengden din gjør at utkastene bommer.
+
+Setter du et intervall senere: **velg minst 30 minutter.** En runde kan ta flere minutter, og
+skriptet har ingen lås mot at to runder overlapper.
 
 ---
 

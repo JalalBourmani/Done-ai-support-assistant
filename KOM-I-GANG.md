@@ -171,8 +171,12 @@ Claude Codes rutiner er lokal brukertilstand — de lagres i `~\.claude\schedule
 maskin, ikke i dette repoet. De kan ikke deles gjennom Git, og en restart av Claude Code får dem ikke
 til å dukke opp.
 
-Har du sett en kollega ha en rutine for dette, må du opprette din egen. Det tar et minutt, og teksten
-du skal lime inn ligger klar i [routine/OPPSETT.md](routine/OPPSETT.md).
+Har du sett en kollega ha en rutine for dette, må du opprette din egen. Raskeste vei er å la agenten
+gjøre det — det ligger en ferdig prompt du kan lime inn i
+[routine/OPPSETT.md](routine/OPPSETT.md).
+
+Bruk den teksten framfor å skrive din egen. Rutineinstruksjonen har fire vaktsetninger som er lette å
+utelate, og de betyr mest når noe går galt uten at du ser på.
 
 Automatisk kjøring er forøvrig **valgfritt**. Mange kjører assistenten manuelt når de trenger den.
 
