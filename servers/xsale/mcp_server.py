@@ -501,7 +501,10 @@ def _extract_email_info(activity: dict) -> dict | None:
             "cc": ("cc",),
             "bcc": ("bcc",),
             "reply_to": ("replyTo", "reply_to"),
-            "body": ("body", "html", "content", "message", "text", "description", "notes"),
+            # "description" og "notes" er BEVISST utelatt. De traff sakens egen
+            # beskrivelse, slik at hver aktivitet fikk samme kropp - den
+            # opprinnelige innkommende e-posten. Funnet 21.08.2026.
+            "body": ("body", "html", "content", "message", "text"),
             "attachments": ("attachments",),
         }
         for target, keys in field_map.items():
@@ -1481,6 +1484,148 @@ def _to_xsale_html(text, raw_html=False):
     s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s.replace("\n", "<br>")
+
+EMAIL_ENTITY_KEYS = {"mailer", "headers", "bcc", "cc", "action"}
+
+
+def _looks_like_email_entity(ref) -> bool:
+    """Skiller en e-postentitet fra saken eller en relasjon.
+
+    Aktivitetens changelog inneholder modelReference-objekter av flere slag.
+    E-postene kjennes igjen pa at de har flere av mailer/headers/bcc/cc/action.
+    """
+    if not isinstance(ref, dict):
+        return False
+    return len(EMAIL_ENTITY_KEYS & set(ref.keys())) >= 3
+
+
+def _header_field(headers, name):
+    if not headers:
+        return ""
+    m = re.search(rf"^{re.escape(name)}:\s*(.+)$", str(headers), re.MULTILINE | re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def _get_email_by_id(email_id):
+    """Henter en e-post i sin helhet.
+
+    Aktivitetslista avkutter body og headers til 200 tegn. Enkeltoppslaget gir
+    hele innholdet. Merk at /email/ MED FILTER ignorerer filteret og returnerer
+    en tilfeldig e-post - bruk alltid /email/{id}.
+    """
+    try:
+        result = _api_get(f"/email/{int(email_id)}")
+    except Exception:
+        return None
+    entity = _extract_entity(result, "email")
+    if not entity and isinstance(result, dict):
+        entity = result.get("email") or result
+    return entity if isinstance(entity, dict) else None
+
+
+@mcp.tool()
+def get_case_emails(serial_number: int, include_bodies: bool = True) -> str:
+    """
+    Gets the actual e-mails on a case, including what WE sent to the customer.
+
+    The relation timeline stores outbound e-mails with an empty note, so the
+    text of our own replies is invisible in get_case_details and
+    get_case_communications. This tool finds the e-mail entities in the
+    activity log and reads each one in full.
+
+    Direction is taken from the activity route: "/email/send" is a reply we
+    sent to the customer. Everything else is an inbound message or an internal
+    notification copy.
+
+    LIMIT: the activity log has a retention window. Cases older than roughly a
+    couple of months return no activities at all, and then no e-mails can be
+    recovered. The response says so explicitly rather than looking empty.
+
+    Args:
+        serial_number: The case serial number, e.g. 47126.
+        include_bodies: Read each e-mail in full. Costs one request per e-mail.
+            False returns only sender, receiver, subject and direction.
+    """
+    case = json.loads(get_case_by_serial(serial_number))
+    if case.get("error"):
+        return json.dumps(case, indent=2, ensure_ascii=False)
+    case_id = case.get("id")
+    if not case_id:
+        return json.dumps({"error": f"Case {serial_number} has no internal id."}, indent=2)
+
+    try:
+        raw = _api_get("/activity/", params={
+            "page": 1, "start": 0, "limit": 200,
+            "filter": _build_filter([{"property": "model", "value": "Customercase"},
+                                     {"property": "fk", "value": int(case_id)}]),
+            "sort": _build_sort([{"property": "created", "direction": "ASC"}]),
+        })
+        activities, _total = _extract_list(raw, "activity")
+    except Exception as e:
+        return json.dumps({
+            "serialNumber": serial_number,
+            "error": f"Could not read the activity log: {e}",
+        }, indent=2, ensure_ascii=False)
+
+    emails = []
+    seen = set()
+    for activity in activities:
+        route = str(activity.get("route") or "")
+        refs = []
+        for change in activity.get("changelog") or []:
+            if isinstance(change, dict):
+                refs.append(change.get("modelReference"))
+        refs.append(activity.get("modelReference"))
+
+        for ref in refs:
+            if not _looks_like_email_entity(ref):
+                continue
+            email_id = ref.get("id")
+            if not email_id or email_id in seen:
+                continue
+            seen.add(email_id)
+
+            full = _get_email_by_id(email_id) if include_bodies else None
+            source = full or ref
+            headers = source.get("headers") or ref.get("headers") or ""
+
+            entry = {
+                "id": email_id,
+                "sent_at": activity.get("created") or source.get("created"),
+                "direction": "outbound" if route == "/email/send" else "inbound_or_notice",
+                "route": route,
+                "sender": source.get("sender") or _header_field(headers, "From"),
+                "receiver": source.get("receiver") or _header_field(headers, "To"),
+                "subject": source.get("subject") or _header_field(headers, "Subject"),
+            }
+            for field in ("cc", "bcc"):
+                if source.get(field):
+                    entry[field] = source[field]
+            if include_bodies:
+                entry["body"] = clean_html(source.get("body") or "")
+                entry["body_truncated_by_api"] = full is None
+            emails.append(entry)
+
+    emails.sort(key=lambda e: str(e.get("sent_at") or ""))
+    outbound = [e for e in emails if e["direction"] == "outbound"]
+
+    return json.dumps({
+        "serialNumber": serial_number,
+        "case_id": case_id,
+        "subject": case.get("subject"),
+        "activities_found": len(activities),
+        "emails_found": len(emails),
+        "outbound_found": len(outbound),
+        "note": (
+            "No activities on this case. The activity log has a retention "
+            "window, so e-mails on older cases cannot be recovered this way."
+            if not activities else
+            "Outbound entries are replies we sent. The rest are inbound "
+            "messages or internal notification copies of them."
+        ),
+        "emails": emails,
+    }, indent=2, ensure_ascii=False, default=str)
+
 
 # ──────────────────────────────────────────────
 # WRITE TOOLS
