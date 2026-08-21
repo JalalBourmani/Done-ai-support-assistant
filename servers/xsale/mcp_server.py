@@ -1465,6 +1465,23 @@ def get_logged_user() -> str:
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
+def _to_xsale_html(text, raw_html=False):
+    """Gjor ren tekst klar for XSALE sine note- og description-felter.
+
+    Feltene lagres og rendres som HTML. Et vanlig linjeskift kollapser derfor
+    til et mellomrom, og et notat skrevet med avsnitt vises som en eneste
+    sammenhengende blokk i grensesnittet. Escaper teksten og gjor linjeskift
+    til <br>, slik at notatet leses slik det ble skrevet.
+
+    raw_html=True sender teksten urort, for de gangene formatering er onsket.
+    """
+    if raw_html:
+        return text
+    s = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.replace("\n", "<br>")
+
 # ──────────────────────────────────────────────
 # WRITE TOOLS
 #
@@ -1491,6 +1508,7 @@ def create_case(
     status: str = "NEW",
     origin: str = "PHONE",
     user_id: int = 0,
+    raw_html: bool = False,
 ) -> str:
     """
     Creates a new case in XSALE. WRITES DATA - only use when explicitly asked to.
@@ -1509,6 +1527,10 @@ def create_case(
         status: Initial status. Default "NEW".
         origin: How the case arrived, e.g. "PHONE" or "EMAIL". Default "PHONE".
         user_id: Owner. Defaults to the logged-in user.
+        raw_html: XSALE stores the description as HTML, so plain newlines
+            collapse and a multi-line description renders as one solid block.
+            By default the text is escaped and line breaks become <br>. Pass
+            True only to send markup through untouched.
     """
     global _user_id
 
@@ -1529,7 +1551,7 @@ def create_case(
     payload = {
         "customerId": int(customer_id),
         "subject": subject,
-        "description": description,
+        "description": _to_xsale_html(description, raw_html),
         "typeKey": type_key,
         "priority": priority,
         "status": status,
@@ -1581,7 +1603,7 @@ def create_case(
 
 
 @mcp.tool()
-def add_case_comment(serial_number: int, note: str) -> str:
+def add_case_comment(serial_number: int, note: str, raw_html: bool = False) -> str:
     """
     Adds an internal comment to an XSALE case. WRITES DATA - only use when
     explicitly asked to.
@@ -1597,6 +1619,10 @@ def add_case_comment(serial_number: int, note: str) -> str:
     Args:
         serial_number: The case serial number, e.g. 46700.
         note: The comment text.
+        raw_html: XSALE stores the note as HTML, so plain newlines collapse and
+            a multi-line note renders as one solid block. By default the text is
+            escaped and line breaks become <br>. Pass True only to send markup
+            through untouched.
     """
     if not str(note).strip():
         return json.dumps({"error": "note is required."}, indent=2)
@@ -1621,7 +1647,7 @@ def add_case_comment(serial_number: int, note: str) -> str:
         "relModel": "",
         "type": "INTERNAL",
         "subtype": "",
-        "note": note,
+        "note": _to_xsale_html(note, raw_html),
         "status": "ACTIVE",
     }
 
