@@ -19,9 +19,47 @@ navn, og du skal ikke anta hvem en sak tilhorer ut fra navnet over.
   Et sok med null treff betyr at emnet er udokumentert der du sokte, ikke at
   problemet ikke finnes.
 - Skill tydelig mellom bekreftede funn, sannsynlig vurdering og det brukeren ma kontrollere manuelt.
-- Lag profesjonelle norske svarutkast som er klare til a sendes, men send aldri e-post selv.
-- Ikke lukk eller endre saker i XSALE uten en eksplisitt instruks fra brukeren.
+- Lag profesjonelle norske svarutkast. Om du kan sende dem selv avgjores av
+  autonominivaaet under - standard er at du ikke kan.
+- Skriv norsk med ae, oe og aa. XSALE lagrer tegnene byte-identisk, saa det
+  finnes ingen grunn til aa transliterere. "Formalet er a bekrefte" ser
+  userioest ut for en kunde. `reply_to_customer` nekter aa sende slik tekst.
+- Verifiser et skriv mot RAADATA, ikke mot et lesehjelpemiddel.
+  `get_case_details`, `get_case_emails` og relasjonslisten kjorer verdier
+  gjennom `clean_html`, og en sammenligning mot dem melder "ikke funnet" paa
+  skrivinger som ligger helt riktig.
 - Ikke vis passord, tokens, PIN-koder eller andre hemmeligheter i svar eller lokale rapporter.
+
+## Autonomi: fire nivaaer
+
+`xsale-crm` kan skrive, men bare saa langt nivaaet rekker. Standard er `les`.
+
+| Nivaa | Tillater |
+|---|---|
+| `les` (standard) | bare lesing, alle skrivinger avvises |
+| `kommenter` | interne kommentarer |
+| `svar` | ogsaa svar til kunde |
+| `full` | ogsaa lukking og statusendring |
+
+**`set_autonomy` skal aldri kalles paa eget initiativ.** Bare naar brukeren ber
+om det, for eksempel for en helgevakt. Varig nivaa settes med `XSALE_AUTONOMY`
+i `config.env`.
+
+Utover nivaaet gjelder tre sperrer, og de skal ikke omgaas:
+
+- Tak paa 20 skrivehandlinger per kjoring.
+- Ingen skriving til en sak som ikke er lest i samme kjoring.
+- Alt loggfores, baade utfort og avvist. `autonomy_report()` er rapporten
+  etter en uovervaket kjoring.
+
+Skriveverktoyene har `dry_run=True` som standard. Torrkjoringen returnerer
+payloaden uten aa skrive, og gaar forbi autonomisperren nettopp fordi den ikke
+skriver noe. Les `mottaker_kilde` i svaret fra `reply_to_customer` for du
+sender - adressen kan komme fra kundekortet og ikke fra korrespondansen.
+
+Begrunnelsen for graderingen er erfaring: en intern kommentar er reversibel,
+en e-post til en regnskapsforer er ikke. Og en sak som lukkes med uverifiserte
+punkter etterlater en misfornoyd kunde uten at noen ser det.
 
 ## Kontroller datamengden for du konkluderer
 
@@ -37,8 +75,11 @@ Ikke start den automatiske koen bare fordi Claude Code apnes. Kjor Auto-XSALE ku
 det, eller nar `scripts\run-auto-xsale.ps1` starter en planlagt runde med prompten i
 `prompts\auto-xsale-saksassistent.md`.
 
-Den uovervakede kjoringen har ingen skrivetilgang til XSALE eller databasen. `create_case` og
-`add_case_comment` er holdt utenfor hvitelisten med vilje. Ikke foresla a utvide den.
+Den uovervakede kjoringen har ingen skrivetilgang til XSALE eller databasen. Alle
+skriveverktoyene er holdt utenfor hvitelisten med vilje - `create_case`,
+`add_case_comment`, `edit_case_comment`, `reply_to_customer`, `set_case_status` og
+`close_case`. Ikke foresla a utvide den. Autonominivaaene gjelder samtaler med et
+menneske til stede, ikke den planlagte koen.
 
 ## Saksmapper
 
