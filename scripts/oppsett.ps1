@@ -14,7 +14,7 @@
 # =============================================================================
 
 param(
-    # Hopp over deler du alt har satt opp: -Bare xsale,mysql,navn,notebooklm
+    # Hopp over deler du alt har satt opp: -Bare xsale,mysql,navn,confluence
     [string[]] $Bare
 )
 
@@ -131,7 +131,7 @@ Du blir bedt om fire ting:
   1. Fornavnet ditt              - slik assistenten kan tiltale deg
   2. XSALE-innlogging            - din egen, ikke noen andres
   3. MySQL-innlogging            - din egen bruker pa ws.tellix.no
-  4. Google-adressen din         - for invitasjon til NotebookLM-prosjektet
+  4. Atlassian API-token          - med omfang for Confluence (valgfritt)
 
 Passordene vises ikke nar du skriver dem, og lagres kryptert med Windows DPAPI.
 De kan ikke leses av andre brukere eller pa andre maskiner.
@@ -156,7 +156,6 @@ if (Skal-Kjore "navn") {
             Write-ClaudeMd `
                 -Destinasjon $projectClaude `
                 -Navn $fornavn `
-                -Notebook $(if ($env:NOTEBOOK_NAME) { $env:NOTEBOOK_NAME } else { "Amendo Knowledge base" }) `
                 -AutoXsaleDir (Get-AutoXsaleDir)
             Write-Host "  Oppdaterte CLAUDE.md med navnet ditt." -ForegroundColor DarkGray
         }
@@ -249,7 +248,7 @@ except Exception as e:
         }
     }
     if (-not $ok) {
-        Write-Host "  Du kan hoppe over dette og fortsette. XSALE og NotebookLM virker uten." -ForegroundColor DarkGray
+        Write-Host "  Du kan hoppe over dette og fortsette. XSALE og kunnskapsserveren virker uten." -ForegroundColor DarkGray
         Write-Host "  Kjor .\scripts\oppsett.ps1 -Bare mysql nar du er pa riktig nett." -ForegroundColor DarkGray
     }
     if ($ok) {
@@ -259,36 +258,61 @@ except Exception as e:
     }
 }
 
-# --- 4. NotebookLM ----------------------------------------------------------
-if (Skal-Kjore "notebooklm") {
-    Skriv-Tittel "4 av 4 - NotebookLM"
+# --- 4. Confluence ----------------------------------------------------------
+if (Skal-Kjore "confluence") {
+    Skriv-Tittel "4 av 4 - Confluence"
     Write-Host @"
-Kunnskapsbasen med Confluence-artiklene ligger i et delt NotebookLM-prosjekt.
-Du ma inviteres for du far tilgang.
+Kunnskapsserveren leser fra to kilder: Confluence-rommene og det offentlige
+hjelpesenteret paa support.amendo.no. Hjelpesenteret virker uten innlogging.
+Confluence krever et API-token med omfang - lag det under
+  id.atlassian.com > Security > API tokens > Create API token with scopes
+og velg Confluence-appen med lesetilgang til sider og rom.
+
+Du kan hoppe over med Enter. Da virker hjelpesenteret, men ikke Confluence-sok.
 "@ -ForegroundColor Gray
-    $gmail = Les-Tekst "Google-adressen du bruker pa jobb"
-    Sett-Config "NOTEBOOKLM_ACCOUNT" $gmail
 
-    $melding = Join-Path $script:KitRoot "generated\notebooklm-forespursel.txt"
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $melding) | Out-Null
-    $navn = if ($env:USER_NAME) { $env:USER_NAME } else { "" }
-    @"
-Hei Jalal,
+    $confUrl = if ($env:CONFLUENCE_URL) { $env:CONFLUENCE_URL } else { "https://tellix.atlassian.net" }
+    Write-Host "Instans: $confUrl" -ForegroundColor Gray
 
-Kan du invitere meg til NotebookLM-prosjektet "$(if ($env:NOTEBOOK_NAME) { $env:NOTEBOOK_NAME } else { 'Amendo Knowledge base' })"?
-
-Google-konto: $gmail
-Navn: $navn
-
-Takk!
-"@ | Set-Content -LiteralPath $melding -Encoding utf8
-
-    Write-Host ""
-    Write-Host "  Send denne til Jalal:" -ForegroundColor Yellow
-    Write-Host "  $melding" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Nar du har fatt invitasjonen, kjor: scripts\login-notebooklm.ps1" -ForegroundColor Gray
+    $epost = Les-Tekst "Atlassian e-post (Enter for aa hoppe over)"
+    if ([string]::IsNullOrWhiteSpace($epost)) {
+        Write-Host "  Hoppet over. Hjelpesenteret virker, Confluence-sok gjor ikke." -ForegroundColor Yellow
+    } else {
+        Sett-Config "CONFLUENCE_URL" $confUrl
+        $ok = $false
+        for ($forsok = 1; $forsok -le 3 -and -not $ok; $forsok++) {
+            $token = Les-Passord "API-token med omfang"
+            $klar = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
+            $ok = Test-Innlogging "Confluence" @{
+                CONFLUENCE_URL = $confUrl; CONFLUENCE_EMAIL = $epost; CONFLUENCE_TOKEN = $klar
+            } @"
+import os, sys
+sys.path.insert(0, r'$(Join-Path $script:KitRoot "servers\kunnskap")')
+try:
+    import mcp_server as K
+    ut = K.kunnskapsstatus()
+    # Statusen nevner Confluence eksplisitt naar tokenet virker.
+    if 'Confluence' in ut and 'ikke satt opp' not in ut:
+        print('OK ' + ut.replace('\n', ' ')[:160])
+    else:
+        print('FEIL: ' + ut.replace('\n', ' ')[:300])
+except Exception as e:
+    print('FEIL: ' + str(e)[:300])
+"@
+            $klar = $null
+            if (-not $ok -and $forsok -lt 3) {
+                Write-Host "  Prov igjen. Tokenet maa ha omfang for Confluence." -ForegroundColor Yellow
+            }
+        }
+        if ($ok) {
+            Lagre-Legitimasjon "confluence.xml" $epost $token
+        } else {
+            Write-Warning "Confluence ble ikke bekreftet. Ingenting lagret. Kjor: scripts\oppsett.ps1 -Bare confluence"
+        }
+    }
 }
+
 
 # --- Oppsummering -----------------------------------------------------------
 Skriv-Tittel "Status"
@@ -296,7 +320,8 @@ $deler = @(
     @{ navn = "Fornavn";      ok = -not [string]::IsNullOrWhiteSpace($env:USER_NAME) -or (Skal-Kjore "navn") },
     @{ navn = "XSALE";        ok = (Test-Path (Join-Path $script:KitRoot "secrets\xsale.xml")) },
     @{ navn = "MySQL";        ok = (Test-Path (Join-Path $script:KitRoot "secrets\mysql.xml")) },
-    @{ navn = "Claude-token"; ok = (Test-Path (Join-Path $script:KitRoot "secrets\claude-token.xml")) }
+    @{ navn = "Claude-token"; ok = (Test-Path (Join-Path $script:KitRoot "secrets\claude-token.xml")) },
+    @{ navn = "Confluence";   ok = (Test-Path (Join-Path $script:KitRoot "secrets\confluence.xml")) }
 )
 foreach ($d in $deler) {
     $merke = if ($d.ok) { "OK   " } else { "MANGLER" }
@@ -310,6 +335,5 @@ if (-not (Test-Path (Join-Path $script:KitRoot "secrets\claude-token.xml"))) {
     Write-Host "  1. scripts\login-claude-cli.ps1        (logg inn i Claude Code)"
     Write-Host "  2. scripts\configure-claude-token.ps1  (lagre tokenet)"
 }
-Write-Host "  3. scripts\login-notebooklm.ps1        (nar du har fatt invitasjonen)"
 Write-Host "  4. scripts\verify.ps1                  (kontroller at alt virker)"
 Write-Host ""

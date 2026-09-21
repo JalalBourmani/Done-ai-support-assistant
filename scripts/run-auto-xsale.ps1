@@ -120,15 +120,23 @@ $allowedTools = @(
     "mcp__xsale-crm__get_order_details",
     "mcp__xsale-crm__get_installation_context",
     "mcp__mysql-query-server__execute_query",
-    "mcp__notebooklm-mcp__notebook_list",
-    "mcp__notebooklm-mcp__notebook_query",
-    "mcp__notebooklm-mcp__notebook_query_start",
-    "mcp__notebooklm-mcp__notebook_query_status"
+    "mcp__kunnskap__sok_hjelpesenter",
+    "mcp__kunnskap__hent_hjelpeartikkel",
+    "mcp__kunnskap__sok_confluence",
+    "mcp__kunnskap__hent_confluence_side",
+    "mcp__kunnskap__kunnskapsstatus"
 )
 
 # Sikkerhetsnett: hvis noen likevel har lagt inn et skrivende XSALE-verktoy,
 # stopp for kjoringen starter framfor a oppdage det i ettertid i en kundesak.
-$forbidden = @("create_case", "add_case_comment", "delete", "close_case", "send_email")
+# Verktoyene fra 21.09.2026 heter noe annet enn de eldste, og tre av dem
+# ville gatt rett gjennom det gamle nettet. Navnene her ma folge med naar
+# xsale-serveren far nye skriveverktoy.
+$forbidden = @(
+    "create_case", "add_case_comment", "edit_case_comment",
+    "reply_to_customer", "set_case_status", "close_case",
+    "delete", "send_email"
+)
 $violations = $allowedTools | Where-Object {
     $t = $_
     ($forbidden | Where-Object { $t -like "*$_*" })

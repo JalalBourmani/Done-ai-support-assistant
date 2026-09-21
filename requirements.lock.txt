@@ -20,7 +20,7 @@
 #    4. .\scripts\install.ps1 og .\scripts\verify.ps1
 #    5. Virker alt, commit. Ellers rull tilbake.
 #
-#  Generert fra et rent miljø der importene og NotebookLM-binærene er verifisert.
+#  Generert fra et rent miljø der importene er verifisert.
 # =============================================================================
 
 aiofile==3.12.3
@@ -66,7 +66,6 @@ markdown-it-py==4.2.0
 mcp==1.29.0
 mdurl==0.1.2
 more-itertools==11.1.0
-notebooklm-mcp-cli==0.9.4
 openapi-pydantic==0.5.1
 opentelemetry-api==1.44.0
 packaging==26.3

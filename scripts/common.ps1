@@ -21,7 +21,7 @@ function Assert-KitLayout {
         sted. Sjekk kontrakten framfor a anta den.
     #>
     $mangler = @()
-    foreach ($s in @("xsale", "mysql")) {
+    foreach ($s in @("xsale", "mysql", "kunnskap")) {
         $fil = Join-Path $script:ServersRoot "$s\mcp_server.py"
         if (-not (Test-Path -LiteralPath $fil)) { $mangler += $fil }
     }
@@ -95,7 +95,6 @@ function Write-ClaudeMd {
     param(
         [Parameter(Mandatory)] [string] $Destinasjon,
         [Parameter(Mandatory)] [string] $Navn,
-        [Parameter(Mandatory)] [string] $Notebook,
         [Parameter(Mandatory)] [string] $AutoXsaleDir
     )
 
@@ -103,7 +102,6 @@ function Write-ClaudeMd {
     $mal = Get-Content -Raw -LiteralPath $malPath
     $mal = $mal.
         Replace("__USER_NAME__", $Navn).
-        Replace("__NOTEBOOK_NAME__", $Notebook).
         Replace("__AUTO_XSALE_DIR__", $AutoXsaleDir)
 
     # En glemt plassholder skal stoppe her, ikke havne i teksten modellen leser

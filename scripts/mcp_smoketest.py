@@ -4,7 +4,7 @@
 Test-Path forteller bare at en fil finnes. Dette forteller at serveren faktisk
 starter, snakker protokoll og eksponerer verktoy - som er det brukeren trenger.
 
-Bruk:  python mcp_smoketest.py <xsale|mysql|notebooklm> [--tool NAVN]
+Bruk:  python mcp_smoketest.py <xsale|mysql|kunnskap> [--tool NAVN]
 Skriver "OK <detaljer>" eller "FEIL: <arsak>" og setter exit-kode.
 """
 import json

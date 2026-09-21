@@ -55,7 +55,7 @@ Sjekk "Filstruktur" { Assert-KitLayout; "servers\xsale og servers\mysql funnet" 
 Sjekk "config.env" {
     Import-ConfigEnv
     $mangler = @()
-    foreach ($n in @("XSALE_URL", "PMA_URL", "NOTEBOOK_NAME", "AUTO_XSALE_DIR")) {
+    foreach ($n in @("XSALE_URL", "PMA_URL", "CONFLUENCE_URL", "AUTO_XSALE_DIR")) {
         if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($n))) { $mangler += $n }
     }
     if ($mangler) { throw "Mangler verdier: $($mangler -join ', '). Kjor install.ps1 og oppsett.ps1." }
@@ -172,7 +172,7 @@ if ($Rask) {
     $servere = @(
         @{ navn = "xsale-crm";          arg = "xsale";      verktoy = "list_my_cases" },
         @{ navn = "mysql-query-server"; arg = "mysql";      verktoy = "execute_query" },
-        @{ navn = "notebooklm-mcp";     arg = "notebooklm"; verktoy = $null }
+        @{ navn = "kunnskap";           arg = "kunnskap";   verktoy = "kunnskapsstatus" }
     )
     foreach ($s in $servere) {
         Sjekk $s.navn {
@@ -180,8 +180,11 @@ if ($Rask) {
             if ($s.verktoy) { $a += @("--tool", $s.verktoy) }
             $ut = (& $script:VenvPython @a 2>&1 | Out-String).Trim()
             if ($ut -like "OK*") { return $ut.Substring(2).Trim() }
-            if ($s.arg -eq "notebooklm") {
-                return "ADVARSEL $ut`n      Har du fatt invitasjonen? Kjor .\scripts\login-notebooklm.ps1"
+            if ($s.arg -eq "kunnskap") {
+                # Hjelpesenteret paa support.amendo.no er offentlig, saa
+                # serveren virker halvveis uten Confluence-token. Da er det en
+                # advarsel, ikke en feil.
+                return "ADVARSEL $ut`n      Mangler Confluence-token? Kjor .\scripts\oppsett.ps1 -Bare confluence"
             }
             throw $ut
         }

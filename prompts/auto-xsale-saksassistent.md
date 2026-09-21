@@ -34,7 +34,7 @@ Arbeidsflyt per runde:
    som ikke har mappe enna. Bruk created-dato nar mulig.
 4. Hent full sak med `get_case_by_serial`, inkludert historikk, interne notater, kundeinfo og
    kontaktdata.
-5. Bruk NotebookLM-notebooken `Amendo Knowledge base` ved behov for rutiner, maler eller intern
+5. Bruk `kunnskap` ved behov for rutiner, maler eller intern
    prosesskunnskap. Bruk MySQL MCP kun til skrivebeskyttede undersokelser nar saken trenger faktadata
    fra ProTouch-databasen.
 6. Opprett mappen `${AUTO_XSALE_ROOT}/<Saksnummer>/`.

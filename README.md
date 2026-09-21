@@ -14,9 +14,9 @@ Du installerer med dine egne innlogginger. Ingenting deles mellom brukere.
 
 | Verktøy | Hva du kan spørre om |
 |---|---|
-| `xsale-crm` | Saker, kunder, ordre, kommunikasjon. Kan opprette sak og kommentar som deg |
+| `xsale-crm` | Saker, kunder, ordre, kommunikasjon. Kan skrive **som deg** — kommentere, svare kunder og endre status, bak autonominivåer |
 | `mysql-query-server` | Oppslag i ProTouch-databasene. **Skrivebeskyttet** |
-| `notebooklm-mcp` | Rutiner og produktkunnskap fra Confluence-artiklene |
+| `kunnskap` | Rutiner og produktkunnskap. Confluence-rommene og support.amendo.no |
 
 **Saksassistenten (Auto-XSALE).** Tar den eldste ubehandlede saken din, undersøker den mot XSALE og
 databasen, og skriver en analyse og et svarutkast til disk. Den sender aldri e-post og lukker aldri
@@ -30,7 +30,8 @@ saker.
 ## Kom i gang
 
 **1. Les [FORUTSETNINGER.md](FORUTSETNINGER.md) først.** Tar 10 minutter, og sparer deg for å stå fast
-midt i installasjonen. Det eneste du må be om på forhånd er invitasjon til NotebookLM-prosjektet.
+midt i installasjonen. Det eneste du må skaffe på forhånd er et Atlassian API-token med omfang,
+og det kan du lage selv.
 
 **2. Klon og installer:**
 
@@ -40,7 +41,7 @@ cd Done-ai-support-assistant
 .\scripts\install.ps1
 ```
 
-**3. Legg inn din legitimasjon.** Du blir spurt om fornavn, XSALE, MySQL og Google-adresse. Hver
+**3. Legg inn din legitimasjon.** Du blir spurt om fornavn, XSALE, MySQL og Atlassian-token. Hver
 innlogging testes med en gang, så du vet at den virker før du går videre:
 
 ```powershell
@@ -54,11 +55,13 @@ innlogging testes med en gang, så du vet at den virker før du går videre:
 .\scripts\configure-claude-token.ps1
 ```
 
-**5. NotebookLM,** når du har fått invitasjonen:
+**5. Confluence,** hvis du hoppet over tokenet i steg 3:
 
 ```powershell
-.\scripts\login-notebooklm.ps1
+.\scripts\oppsett.ps1 -Bare confluence
 ```
+
+Hjelpesenteret på support.amendo.no virker uten token. Confluence-søk gjør ikke.
 
 **6. Kontroller at alt virker:**
 
@@ -131,5 +134,5 @@ git pull
 ## Når noe ikke virker
 
 Kjør `.\scripts\verify.ps1` først, og ta med utdataen. Den skiller mellom manglende Python, tom
-legitimasjonsfil, manglende NotebookLM-innlogging og en server som ikke starter — så feilsøkingen
+legitimasjonsfil, manglende Confluence-token og en server som ikke starter — så feilsøkingen
 begynner på riktig sted.

@@ -1,7 +1,7 @@
 # Kom i gang
 
-Regn med **20–30 minutter** første gang. Har du lest [FORUTSETNINGER.md](FORUTSETNINGER.md) og bedt om
-NotebookLM-invitasjonen på forhånd, går det raskere.
+Regn med **20–30 minutter** første gang. Har du lest [FORUTSETNINGER.md](FORUTSETNINGER.md) og laget
+Atlassian-tokenet på forhånd, går det raskere.
 
 Alle kommandoer kjøres fra repo-mappen i **PowerShell**.
 
@@ -64,7 +64,7 @@ havne i Git.
 .\scripts\oppsett.ps1
 ```
 
-Du blir spurt om fire ting: fornavnet ditt, XSALE-innlogging, MySQL-innlogging, og Google-adressen din.
+Du blir spurt om fire ting: fornavnet ditt, XSALE-innlogging, MySQL-innlogging, og Atlassian-tokenet ditt.
 
 **Hver innlogging testes med en gang.** Er passordet feil, får du beskjed der og da og tre forsøk.
 Ingenting lagres før innloggingen er bekreftet.
@@ -87,15 +87,17 @@ To steg, i denne rekkefølgen. Begge er interaktive — de kan ikke automatisere
 Det første logger deg inn. Det andre lagrer et token som de automatiske kjøringene bruker, siden
 `claude setup-token` ikke logger inn kommandolinjeverktøyet av seg selv.
 
-## 5. NotebookLM
+## 5. Confluence
 
-Når du har fått invitasjonen fra Jalal:
+Kunnskapsserveren spør Confluence og det offentlige hjelpesenteret. Tokenet
+legges inn av `oppsett.ps1` sammen med resten. Hoppet du over det da, kan du
+kjøre bare det steget:
 
 ```powershell
-.\scripts\login-notebooklm.ps1
+.\scripts\oppsett.ps1 -Bare confluence
 ```
 
-Den åpner en nettleser der du logger inn med Google-kontoen du oppgav i steg 3.
+Hjelpesenteret på support.amendo.no virker uten token. Confluence-søk gjør ikke.
 
 ## 6. Kontroller at alt virker
 
@@ -206,6 +208,6 @@ ned — de henger ofte sammen.
 | «Kan ikke dekrypteres» | Legitimasjonen er laget på en annen maskin. Kjør `oppsett.ps1` på nytt |
 | «Fila er tom» | En passorddialog ble avbrutt. Kjør `oppsett.ps1` på nytt |
 | Verktøyene mangler i Claude Code | Du har åpnet feil mappe. Åpne repo-mappen |
-| NotebookLM feiler | Har du fått invitasjonen? Kjør `login-notebooklm.ps1` |
+| Confluence-søk feiler | Mangler tokenet, eller er det uten omfang? Kjør `oppsett.ps1 -Bare confluence` |
 
 Får du ikke løst det, ta med hele utdataen fra `verify.ps1` når du spør.

@@ -8,7 +8,7 @@
 
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("xsale", "mysql", "notebooklm")]
+    [ValidateSet("xsale", "mysql", "kunnskap")]
     [string] $Server
 )
 
@@ -46,15 +46,20 @@ switch ($Server) {
         exit $LASTEXITCODE
     }
 
-    "notebooklm" {
-        $exe = Join-Path $script:VenvRoot "Scripts\notebooklm-mcp.exe"
-        if (-not (Test-Path -LiteralPath $exe)) {
-            throw "NotebookLM MCP er ikke installert. Kjor scripts\install.ps1."
+    "kunnskap" {
+        # Confluence-token er valgfritt: hjelpesenteret paa support.amendo.no
+        # er offentlig, saa serveren skal starte og virke halvveis selv uten
+        # legitimasjon. Da sier kunnskapsstatus() tydelig at Confluence ikke
+        # er satt opp, framfor at serveren nekter aa starte.
+        $confluenceSecret = Join-Path $script:KitRoot "secrets\confluence.xml"
+        if (Test-Path -LiteralPath $confluenceSecret) {
+            Import-EncryptedCredential `
+                -Path $confluenceSecret `
+                -UsernameVariable "CONFLUENCE_EMAIL" `
+                -PasswordVariable "CONFLUENCE_TOKEN"
         }
-        # Innloggingen ligger i brukerens egen profil under
-        # %USERPROFILE%\.notebooklm-mcp-cli\, ikke i settet. Den skal aldri
-        # kopieres mellom maskiner - den inneholder aktive Google-sesjonsinfokapsler.
-        & $exe
+        & $script:VenvPython (Join-Path $script:ServersRoot "kunnskap\mcp_server.py")
         exit $LASTEXITCODE
     }
+
 }

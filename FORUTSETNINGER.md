@@ -20,7 +20,7 @@ fleste punktene har du sannsynligvis allerede.
 | 6 | Egen XSALE-bruker | Du har den alt |
 | 7 | Egen MySQL-bruker på `ws.tellix.no` (phpMyAdmin) | Du har den alt |
 | 8 | **Kontornett eller VPN** — for MySQL-delen | Se under |
-| 9 | Invitasjon til NotebookLM-prosjektet | **Må bes om — se under** |
+| 9 | Atlassian API-token med omfang — for Confluence | Lager du selv — se under |
 | 10 | Tilgang til GitHub-repoet | **Må bes om — se under** |
 
 ### Rask sjekk
@@ -44,9 +44,14 @@ Gjør begge **før** du starter installasjonen, så du ikke må vente midt i den
 invitasjonen som kommer på e-post. Uten den feiler `git clone` med `Repository not found` — en melding
 som ikke antyder at problemet er tilgang.
 
-**2. NotebookLM-tilgang.** Kunnskapsbasen med Confluence-artiklene ligger i et delt NotebookLM-prosjekt.
-Send Jalal **Google-kontoen du bruker på jobb**, og be om invitasjon til «Amendo Knowledge base».
-Uten den vil `notebooklm-mcp` feile ved innlogging, men de to andre serverne virker likevel.
+**2. Confluence-token.** Kunnskapsserveren leser fra Confluence-rommene og fra det offentlige
+hjelpesenteret på support.amendo.no. Hjelpesenteret krever ingen innlogging; Confluence gjør.
+
+Lag tokenet selv under **id.atlassian.com → Security → API tokens → Create API token with scopes**.
+Velg Confluence-appen og lesetilgang til sider og rom. Et **klassisk** token uten omfang virker
+ikke mot den API-flaten serveren bruker.
+
+Hopper du over dette, virker hjelpesenteret likevel, og `kunnskapsstatus` sier hva som mangler.
 
 ---
 
@@ -63,7 +68,7 @@ Authentication Error: Login to phpMyAdmin failed. Please check DB_USER and DB_PA
 
 …uansett årsak. Får du den, **sjekk nettverket før du sjekker passordet.**
 
-Dette gjelder bare MySQL-delen. XSALE og NotebookLM virker hvor som helst, så du kan fullføre resten
+Dette gjelder bare MySQL-delen. XSALE og kunnskapsserveren virker hvor som helst, så du kan fullføre resten
 av installasjonen og kjøre dette senere:
 
 ```powershell
@@ -101,9 +106,9 @@ Verdt å være bevisst på, siden det er kundedata:
 
 | Server | Tilgang | Skriverettigheter |
 |---|---|---|
-| `xsale-crm` | Saker, kunder, ordre, kommunikasjon | Kan opprette sak og kommentar **som deg** |
+| `xsale-crm` | Saker, kunder, ordre, kommunikasjon | Kommentar, kundesvar og statusendring **som deg** — se autonominivåer |
 | `mysql-query-server` | ProTouch-databasene via phpMyAdmin | **Ingen.** Kun SELECT/SHOW/DESCRIBE/EXPLAIN |
-| `notebooklm-mcp` | Amendo-kunnskapsbasen | Ingen |
+| `kunnskap` | Confluence-rommene og support.amendo.no | Ingen |
 
 **Den automatiske køen har ingen skrivetilgang til XSALE eller databasen.** Den kjører med en
 eksplisitt hviteliste der bare lesende XSALE-verktøy er med — `create_case` og `add_case_comment` er
@@ -137,6 +142,6 @@ Kjør alltid dette først:
 ```
 
 Den sjekker hvert ledd og sier hva som mangler — om det er Python, en tom legitimasjonsfil, manglende
-NotebookLM-innlogging eller en server som ikke starter. Ta med utdataen når du ber om hjelp.
+Confluence-token eller en server som ikke starter. Ta med utdataen når du ber om hjelp.
 
 Neste steg: [KOM-I-GANG.md](KOM-I-GANG.md)

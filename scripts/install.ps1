@@ -93,13 +93,6 @@ $sjekk = (& $script:VenvPython -W ignore -c `
     "import mcp, requests; print(mcp.__name__, requests.__version__)" 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Pakkene ble installert, men kan ikke importeres: $sjekk" }
 
-$nlm = Join-Path $script:VenvRoot "Scripts\nlm.exe"
-$nlmMcp = Join-Path $script:VenvRoot "Scripts\notebooklm-mcp.exe"
-foreach ($e in @($nlm, $nlmMcp)) {
-    if (-not (Test-Path -LiteralPath $e)) {
-        Write-Warning "  Fant ikke $(Split-Path -Leaf $e). NotebookLM vil ikke virke."
-    }
-}
 Write-Host "  Ferdig  ($sjekk)"
 
 # --- Mapper -----------------------------------------------------------------
@@ -197,9 +190,8 @@ if (-not (Test-Path -LiteralPath $projectClaude)) {
     # skriver denne fila om da. Windows-brukernavnet er bare et midlertidig
     # utgangspunkt.
     $navn = if ($env:USER_NAME) { $env:USER_NAME } else { $env:USERNAME }
-    $notebook = if ($env:NOTEBOOK_NAME) { $env:NOTEBOOK_NAME } else { "Amendo Knowledge base" }
 
-    Write-ClaudeMd -Destinasjon $projectClaude -Navn $navn -Notebook $notebook `
+    Write-ClaudeMd -Destinasjon $projectClaude -Navn $navn `
         -AutoXsaleDir $AutoXsaleDir
     Write-Host "  Opprettet $projectClaude (foreløpig navn: $navn)"
 } else {
@@ -247,8 +239,7 @@ Write-Host "Neste steg, i denne rekkefolgen:" -ForegroundColor Cyan
 Write-Host "  1. .\scripts\oppsett.ps1                 legg inn din legitimasjon"
 Write-Host "  2. .\scripts\login-claude-cli.ps1        logg inn i Claude Code"
 Write-Host "  3. .\scripts\configure-claude-token.ps1  lagre tokenet"
-Write-Host "  4. .\scripts\login-notebooklm.ps1        nar du har fatt invitasjonen"
-Write-Host "  5. .\scripts\verify.ps1                  kontroller at alt virker"
+Write-Host "  4. .\scripts\verify.ps1                  kontroller at alt virker"
 Write-Host ""
 Write-Host "Apne deretter $ProjectRoot i Claude Code." -ForegroundColor Gray
 Write-Host ""

@@ -26,6 +26,3 @@ mcp==1.29.0
 # ExtJSON-API-et, MySQL-serveren med phpMyAdmin.
 requests==2.34.2
 
-# NotebookLM-serveren. Leverer bade `nlm.exe` (innlogging) og
-# `notebooklm-mcp.exe` (selve MCP-serveren) i .venv\Scripts\.
-notebooklm-mcp-cli==0.9.4
