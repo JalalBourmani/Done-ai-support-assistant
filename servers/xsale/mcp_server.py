@@ -1,5 +1,8 @@
 import os
 import re
+import html as html_mod
+import io
+import time
 import json
 import requests
 import urllib.parse
@@ -137,6 +140,109 @@ def _extract_entity(result: dict, entity_key: str) -> dict:
     if isinstance(data, list):
         return data[0] if data else {}
     return data if isinstance(data, dict) else {}
+
+
+def _api_put(path, payload=None, params=None, max_retries=2):
+    """PUT mot XSALE-API-et. Oppdatering, i motsetning til POST.
+
+    Skillet er ikke kosmetisk: POST /customercase/<id> ignorerer id-en i stien
+    og OPPRETTER en ny sak, med success:true og meldingen "Sak opprettet".
+    Malt tre ganger på TESTKUNDE 21.09.2026 - tre saker ble til der jeg
+    trodde jeg endret en status. Oppdatering krever PUT, og id-en må ligge i
+    payloaden.
+
+    Som _api_post returneres success=false til kalleren uten nytt forsok. Et
+    gjentatt skriv er farligere enn en feilmelding.
+    """
+    base_url = _get_env()[0]
+    last_error = None
+
+    for attempt in range(max_retries):
+        sess = _get_session()
+        url = f"{base_url}{path}"
+        try:
+            resp = sess.put(url, json=payload, params=params, timeout=30)
+
+            if resp.status_code in (401, 403) or "/user/login" in resp.url:
+                _clear_session()
+                last_error = f"not authenticated (HTTP {resp.status_code})"
+                continue
+
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except ValueError:
+                return {"success": False,
+                        "message": "Non-JSON response from XSALE.",
+                        "raw": resp.text[:500]}
+        except requests.RequestException as exc:
+            last_error = str(exc)
+            break
+
+    return {"success": False,
+            "message": f"PUT {path} failed: {last_error}"}
+
+
+# Feltene som må være med i en PUT for at ingenting skal blankes.
+# Utelates priority, settes den til tom. Utelates customerId, svarer XSALE
+# "Kunne ikke finne kunde". description står bevisst IKKE her.
+CASE_UPDATE_FIELDS = ("id", "customerId", "subject", "typeKey", "priority",
+                      "userId", "origin", "contactId", "notes",
+                      "requestedById", "type")
+
+
+def _bygg_status_payload(raa_sak, ny_status):
+    """Payloaden som endrer status uten å blanke noe.
+
+    Malt på sak 48638-48641 21.09.2026:
+      {id, status}                     -> "Kunne ikke finne kunde"
+      uten priority                    -> priority blankes
+      uten customerId                  -> "Kunne ikke finne kunde"
+      med disse feltene                -> bare status endres, 33 andre urørt
+
+    description står bevisst utenfor. Den er ikke nødvendig, og å ekko den
+    tilbake er den siste måten å overskrive HTML-en i saken på.
+    """
+    p = {}
+    for felt in CASE_UPDATE_FIELDS:
+        if felt in raa_sak:
+            v = raa_sak[felt]
+            if isinstance(v, dict):
+                v = v.get("id")
+            p[felt] = v
+    p["status"] = str(ny_status)
+    return p
+
+
+def _bygg_epost_payload(case_id, emne, innhold_html, mottaker, cc=""):
+    """Payloaden /email/send godtar.
+
+    Feltnavnene er trådfeltene, ikke kolonnenavnene. Aktivitetsloggen viser
+    body/receiver/sender fordi det er de LAGREDE navnene; API-et vil ha
+    content og to. Og "to" må være en LISTE - som streng svarer XSALE
+    "to should not be blank" selv om feltet er fylt ut.
+
+    Avsender settes serverside (målt til support@plorea.com), så sender
+    sendes ikke med.
+    """
+    p = {
+        "model": "Customercase",
+        "fk": int(case_id),
+        "action": "email/send",
+        "subject": str(emne),
+        "content": innhold_html,
+        "to": [str(mottaker)],
+    }
+    kopi = [a.strip() for a in re.split(r"[;,]", str(cc or "")) if a.strip()]
+    if kopi:
+        p["cc"] = kopi
+    return p
+
+
+def _raa_sak(case_id):
+    """Saksposten slik den er lagret, uten clean_html."""
+    return _extract_entity(_api_get("/customercase/%d" % int(case_id)),
+                           "customercase")
 
 
 def _api_get_optional(path, params=None):
@@ -392,6 +498,39 @@ def _dedupe_by_id(items: list[dict]) -> list[dict]:
         seen.add(key)
         result.append(item)
     return result
+
+
+def _raa_epost(email_id):
+    """En e-postpost slik den er lagret, uten clean_html."""
+    try:
+        return _extract_entity(_api_get("/email/%d" % int(email_id)), "email")
+    except Exception:
+        return {}
+
+
+def _raa_relasjoner(case_id, limit=50):
+    """Relasjonene på en sak slik de er LAGRET, uten clean_html.
+
+    _format_relation vasker note-feltet, så den kan ikke brukes til å
+    verifisere at et skriv landet. Her hentes rader rått.
+
+    Merk at XSALE ignorerer tekstfiltre, så fk filtreres lokalt.
+    """
+    ut = []
+    try:
+        filt = json.dumps([{"property": "model", "value": "customercase"},
+                           {"property": "fk", "value": int(case_id)}])
+        r = _api_get("/relation/", {"filter": filt, "limit": limit,
+                                    "sort": json.dumps(
+                                        [{"property": "id",
+                                          "direction": "DESC"}])})
+        rader, _ = _extract_list(r, "relation")
+        for rel in rader:
+            if str(rel.get("fk")) == str(case_id):
+                ut.append(rel)
+    except Exception:
+        pass
+    return ut
 
 
 def _format_relation(relation: dict) -> dict:
@@ -979,6 +1118,7 @@ def get_case_by_serial(serial_number: int) -> str:
     Args:
         serial_number: The numeric serial number of the case to retrieve.
     """
+    _mark_case_read(serial_number)
     global _user_id
     if _user_id is None:
         _get_session()
@@ -1124,6 +1264,7 @@ def get_case_communications(serial_number: int, include_activities: bool = True)
         serial_number: The visible XSALE case number, e.g. 42152.
         include_activities: Include activity log enrichment. Default True.
     """
+    _mark_case_read(serial_number)
     case = _get_case_data_by_serial(serial_number)
     if case.get("error"):
         return json.dumps(case, indent=2, ensure_ascii=False)
@@ -1267,6 +1408,7 @@ def get_installation_context(serial_number: int) -> str:
     Args:
         serial_number: The visible XSALE case number, e.g. 42152.
     """
+    _mark_case_read(serial_number)
     case = _get_case_data_by_serial(serial_number)
     if case.get("error"):
         return json.dumps(case, indent=2, ensure_ascii=False)
@@ -1333,75 +1475,514 @@ def get_installation_context(serial_number: int) -> str:
 
 
 
+
+# --- Autonominivaa ---------------------------------------------------------
+#
+# Fire nivåer, ikke en av/på-bryter. Begrunnelsen er empirisk: i uke 38/2026
+# ville tre av mine egne utkast vært feil om de gikk ut automatisk.
+#
+#   Lille Lov  - "synken har feilet siden midten av august". Feil. Loggen forer
+#                bare feil, så fravær av feil var ikke suksess.
+#   Hany Metry - "BAX-prosedyren finnes ikke dokumentert". Feil. Den laa i
+#                Confluence, oppdatert to uker for.
+#   Sak 48404  - omfanget var et underanslag presentert som et funn.
+#
+# Monsteret er ikke at agenten er uforsiktig, men at den var SIKKER OG FEIL.
+# Interne kommentarer er reversible og trygge; en e-post til en regnskapsforer
+# er ikke. Derfor skiller nivåene på hvor langt ut handlingen rekker.
+#
+# Lukking har sitt eget minefelt: sak 38306 ble lukket med "migrert til ny
+# platform" mens fem av seks meldte punkter var uverifiserte. Kunden hadde da
+# vært misfornøyd i et år.
+
+AUTONOMY_LEVELS = ("les", "kommenter", "svar", "full")
+AUTONOMY_DESC = {
+    "les": "bare lesing - alle skrivinger avvises",
+    "kommenter": "interne kommentarer; kundesvar og lukking krever Jalal",
+    "svar": "interne kommentarer og kundesvar; lukking krever Jalal",
+    "full": "også lukking - helautonomt",
+}
+DEFAULT_AUTONOMY = "les"
+MAX_AUTONOMOUS_ACTIONS = 20
+
+AUDIT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "autonomy_audit.log")
+
+_autonomy = None
+_actions_done = 0
+_cases_read = set()
+
+
+def autonomy():
+    global _autonomy
+    if _autonomy is None:
+        v = (os.getenv("XSALE_AUTONOMY") or DEFAULT_AUTONOMY).strip().lower()
+        _autonomy = v if v in AUTONOMY_LEVELS else DEFAULT_AUTONOMY
+    return _autonomy
+
+
+def _audit(handling, serial, detaljer):
+    """Skriver hver skrivehandling til logg. Grunnlaget for mandagsrapporten.
+
+    En helgekjoring skal ikke bare ha handtert saker - den skal kunne gjøre
+    rede for hva som ble gjort, hvorfor, og hva den lot være å røre.
+    """
+    try:
+        with io.open(AUDIT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "tid": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "nivaa": autonomy(),
+                "handling": handling,
+                "sak": serial,
+                "detaljer": detaljer,
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _mark_case_read(serial):
+    """Kalles av leseverktøyene. Grunnlaget for sperren mot å skrive blindt."""
+    try:
+        _cases_read.add(int(serial))
+    except (TypeError, ValueError):
+        pass
+
+
+def _krev_nivaa(handling, kreves, serial):
+    """None hvis handlingen er tillatt, ellers en forklarende feiltekst."""
+    na = autonomy()
+    if AUTONOMY_LEVELS.index(na) < AUTONOMY_LEVELS.index(kreves):
+        _audit(handling + ":AVVIST", serial, "nivå %s < %s" % (na, kreves))
+        return json.dumps({
+            "utfort": False,
+            "arsak": "autonominivaa",
+            "handling": handling,
+            "naavaerende_nivaa": na,
+            "kreves": kreves,
+            "forklaring": (
+                "Nivået er '%s' (%s). Handlingen '%s' krever '%s'. Jalal kan "
+                "heve nivået med set_autonomy('%s'), eller godkjenne denne "
+                "ene handlingen manuelt."
+                % (na, AUTONOMY_DESC[na], handling, kreves, kreves)),
+        }, indent=2, ensure_ascii=False)
+
+    if _actions_done >= MAX_AUTONOMOUS_ACTIONS:
+        _audit(handling + ":TAK", serial, "%d handlinger" % _actions_done)
+        return json.dumps({
+            "utfort": False,
+            "arsak": "handlingstak",
+            "forklaring": (
+                "Taket på %d skrivehandlinger per kjøring er nådd. Det er en "
+                "sperre mot at en løkke spiser køen. Start en ny kjøring, "
+                "eller hev MAX_AUTONOMOUS_ACTIONS bevisst."
+                % MAX_AUTONOMOUS_ACTIONS),
+        }, indent=2, ensure_ascii=False)
+
+    if serial is not None and int(serial) not in _cases_read:
+        _audit(handling + ":ULEST", serial, "saken er ikke lest i kjoringen")
+        return json.dumps({
+            "utfort": False,
+            "arsak": "saken er ikke lest",
+            "forklaring": (
+                "Sak %s er ikke hentet i denne kjøringen. Les den med "
+                "get_case_by_serial eller get_case_communications først. Å "
+                "skrive til en sak man ikke har lest er nettopp hvordan sak "
+                "38306 ble lukket med fem uverifiserte punkter." % serial),
+        }, indent=2, ensure_ascii=False)
+    return None
+
+
 @mcp.tool()
-def search_cases(query: str, status: str = "ACTIVE", limit: int = 50) -> str:
-    """
-    Searches for cases matching a text query (searches in subject, description, customer name).
-    
+def get_autonomy() -> str:
+    """Viser gjeldende autonominivå og hva det tillater."""
+    return json.dumps({
+        "nivaa": autonomy(),
+        "betyr": AUTONOMY_DESC[autonomy()],
+        "nivaaer": AUTONOMY_DESC,
+        "handlinger_utfort_denne_kjoringen": _actions_done,
+        "tak_per_kjoring": MAX_AUTONOMOUS_ACTIONS,
+        "saker_lest_denne_kjoringen": sorted(_cases_read),
+        "revisjonslogg": AUDIT_LOG,
+    }, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_autonomy(level: str, begrunnelse: str = "") -> str:
+    """Setter autonominivå. SKAL bare kalles når Jalal ber om det.
+
+    Nivaaene, fra minst til mest inngripende:
+      les       - bare lesing
+      kommenter - interne kommentarer
+      svar      - også svar til kunde
+      full      - også lukking av saker
+
     Args:
-        query: The search text.
-        status: Filter by status. Default: "ACTIVE". Options: "ACTIVE", "CLOSED", "ALL".
-        limit: Maximum number of results. Default: 50.
+        level: Ett av nivåene over.
+        begrunnelse: Kort grunn, f.eks. "helgevakt 21.-22.09". Loggfores.
     """
-    filters = [{"property": "query", "value": query}]
-    if status != "ALL":
+    global _autonomy
+    v = str(level or "").strip().lower()
+    if v not in AUTONOMY_LEVELS:
+        return json.dumps({
+            "endret": False,
+            "error": "Ukjent nivå %r. Gyldige: %s"
+                     % (level, ", ".join(AUTONOMY_LEVELS)),
+        }, indent=2, ensure_ascii=False)
+    forrige = autonomy()
+    _autonomy = v
+    _audit("set_autonomy", None, "%s -> %s (%s)" % (forrige, v, begrunnelse))
+    return json.dumps({
+        "endret": True,
+        "fra": forrige,
+        "til": v,
+        "betyr": AUTONOMY_DESC[v],
+        "begrunnelse": begrunnelse,
+        "merknad": ("Nivået gjelder bare denne kjøringen. Sett "
+                    "XSALE_AUTONOMY i config.env for å gjøre det varig."),
+    }, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def autonomy_report() -> str:
+    """Rapport over skrivehandlinger fra revisjonsloggen.
+
+    Ment som mandagsrapporten etter en helgekjoring: hva ble gjort, hva ble
+    avvist, og hvorfor.
+    """
+    if not os.path.exists(AUDIT_LOG):
+        return json.dumps({"linjer": 0,
+                           "merknad": "Ingen skrivehandlinger er loggfort."},
+                          indent=2, ensure_ascii=False)
+    rader = []
+    with io.open(AUDIT_LOG, encoding="utf-8") as fh:
+        for ln in fh:
+            try:
+                rader.append(json.loads(ln))
+            except Exception:
+                pass
+    utfort = [r for r in rader if ":" not in r.get("handling", "")]
+    avvist = [r for r in rader if ":" in r.get("handling", "")]
+    return json.dumps({
+        "totalt_loggfort": len(rader),
+        "utfort": len(utfort),
+        "avvist": len(avvist),
+        "siste_50": rader[-50:],
+    }, indent=2, ensure_ascii=False)
+
+
+# --- Kunderegister -------------------------------------------------------
+#
+# XSALEs API respekterer id-filtre (customerId, userId) og IGNORERER tekst-
+# filtre - stille. Maalt 21.09.2026: query/name/serialNumber mot /customer/ og
+# query/subject/serialNumber mot /customercase/ returnerer alle hele tabellen,
+# som om filteret var tomt. Det er derfor search_cases aldri har virket: den ba
+# om et filtrert sett, fikk 45 632 rader, filtrerte de første 50 klientsiden og
+# falt så tilbake til bare innlogget brukers egne saker.
+#
+# Losningen er et lokalt navn -> customerId-register, bygget ved paginering.
+# Deretter er customerId-filteret bade raskt og komplett: 10 saker på 2,6 s.
+
+CUSTOMER_INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "customer_index.json")
+_customer_index = None
+
+
+def _load_customer_index():
+    """(kunder, metadata) eller (None, feiltekst)."""
+    global _customer_index
+    if _customer_index is not None:
+        return _customer_index, None
+    if not os.path.exists(CUSTOMER_INDEX_PATH):
+        return None, ("Kunderegisteret mangler (%s). Bygg det med "
+                      "rebuild_customer_index()." % CUSTOMER_INDEX_PATH)
+    try:
+        with io.open(CUSTOMER_INDEX_PATH, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception as e:
+        return None, "Kunderegisteret kunne ikke leses: %s" % e
+    _customer_index = d
+    return d, None
+
+
+def _ordmengde(s):
+    return {o for o in re.split(r"[^\wæøåÆØÅ]+", str(s or "").casefold()) if o}
+
+
+def _match_kunder(behov, kunder, maks=12):
+    """Kunder som matcher soketeksten.
+
+    Tre nivåer, i rekkefolge: eksakt navn, delstreng, og ordmengde. Det siste
+    fordi kundenavn i XSALE varierer i form - "MRM AS" mot "Ming Restaurant" -
+    og eksakt navnematch derfor bommer oftere enn den treffer.
+    """
+    b = str(behov or "").strip().casefold()
+    if not b:
+        return []
+    bo = _ordmengde(b)
+
+    eksakt, delstreng, ordvis = [], [], []
+    for c in kunder:
+        navn = str(c.get("navn") or "").casefold()
+        felt = " ".join([navn, str(c.get("epost") or "").casefold(),
+                         str(c.get("orgnr") or ""), str(c.get("serial") or "")])
+        if navn == b:
+            eksakt.append(c)
+        elif b in felt:
+            delstreng.append(c)
+        elif bo and bo <= _ordmengde(felt):
+            ordvis.append(c)
+    return (eksakt + delstreng + ordvis)[:int(maks or 12)]
+
+
+def _cases_for_customer(customer_id, status="ALL", limit=100):
+    filters = [{"property": "customerId", "value": int(customer_id)}]
+    if status and status != "ALL":
         filters.append({"property": "status", "value": status})
-
-    params = {
-        "page": 1,
-        "start": 0,
-        "limit": limit,
+    r = _api_get("/customercase/", params={
+        "page": 1, "start": 0, "limit": limit,
         "filter": _build_filter(filters),
-        "sort": _build_sort([{"property": "updated", "direction": "DESC"}]),
-    }
+        "sort": _build_sort([{"property": "updated", "direction": "DESC"}])})
+    saker, tot = _extract_list(r, "customercase")
+    return saker, tot
 
-    needle = query.casefold()
 
-    def haystack(case: dict) -> str:
-        customer = case.get("customer") or {}
-        contact = case.get("contact") or {}
-        parts = [
-            str(case.get("serialNumber") or ""),
-            case.get("subject") or "",
-            case.get("description") or "",
-            customer.get("name", "") if isinstance(customer, dict) else str(customer),
-            contact.get("name", "") if isinstance(contact, dict) else str(contact),
-            contact.get("email", "") if isinstance(contact, dict) else "",
-        ]
-        return " ".join(parts).casefold()
+@mcp.tool()
+def find_customer(query: str, limit: int = 12) -> str:
+    """Finner en kunde på navn, e-post, org.nr eller kundenummer.
 
-    result = _api_get("/customercase/", params=params)
-    cases, total = _extract_list(result, "customercase")
-    matched_cases = [case for case in cases if needle in haystack(case)]
-    if matched_cases:
-        cases = matched_cases[:limit]
-        total = len(matched_cases)
+    Bruker det lokale kunderegisteret, fordi XSALEs egne tekstfiltre ikke
+    virker. Returnerer kandidater med customerId, som er den eneste nøkkelen
+    saksfiltrene respekterer.
 
-    # XSALE's query filter can miss cases that are still returned by the
-    # assigned-user list, or return a broad unfiltered result set. Fall back to
-    # a small client-side search there when the server result has no match.
-    if not matched_cases:
-        global _user_id
-        if _user_id is None:
-            _get_session()
-        if _user_id is not None:
-            fallback_filters = [{"property": "userId", "value": _user_id}]
-            if status != "ALL":
-                fallback_filters.append({"property": "status", "value": status})
-            fallback_params = {
-                "page": 1,
-                "start": 0,
-                "limit": 1000,
-                "filter": _build_filter(fallback_filters),
-                "sort": _build_sort([{"property": "updated", "direction": "DESC"}]),
+    Args:
+        query: Navn, e-post, organisasjonsnummer eller kundenummer.
+        limit: Maks antall kandidater.
+    """
+    d, feil = _load_customer_index()
+    if feil:
+        return json.dumps({"error": feil}, indent=2, ensure_ascii=False)
+    treff = _match_kunder(query, d.get("kunder") or [], maks=limit)
+    return json.dumps({
+        "query": query,
+        "registeret_bygget": d.get("bygget"),
+        "kunder_i_registeret": d.get("antall_i_registeret"),
+        "antall_treff": len(treff),
+        "treff": treff,
+        "merknad": ("Ingen treff i registeret. Det betyr at ingen kunde har "
+                    "denne teksten i navn, e-post, org.nr eller kundenummer - "
+                    "ikke at saken ikke finnes. Er registeret gammelt, bygg "
+                    "det på nytt med rebuild_customer_index()."
+                    if not treff else None),
+    }, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def rebuild_customer_index() -> str:
+    """Bygger kunderegisteret på nytt ved å paginere gjennom /customer/.
+
+    Tar rundt 25 sekunder for ca. 15 600 kunder. Kjor den når en ny kunde
+    ikke finnes i find_customer.
+    """
+    global _customer_index
+    SIDE = 1000
+    alle, sett, side, forrige_forste, totalt = {}, set(), 0, None, None
+    while side < 60:
+        r = _api_get("/customer/", params={
+            "page": side + 1, "start": side * SIDE, "limit": SIDE,
+            "sort": _build_sort([{"property": "id", "direction": "ASC"}])})
+        rader, tot = _extract_list(r, "customer")
+        if totalt is None:
+            totalt = tot
+        if not rader:
+            break
+        # Et start-parameter som ignoreres ville gitt identiske sider og et
+        # register med 1000 kunder som ser komplett ut. Stopp hoyt i stedet.
+        if rader[0].get("id") == forrige_forste:
+            return json.dumps({
+                "built": False,
+                "error": ("Pagineringen flytter seg ikke - side %d starter på "
+                          "samme kunde som forrige. Registeret ville blitt "
+                          "ufullstendig, så ingenting er lagret." % (side + 1)),
+            }, indent=2, ensure_ascii=False)
+        forrige_forste = rader[0].get("id")
+        for c in rader:
+            cid = c.get("id")
+            if cid is None or cid in sett:
+                continue
+            sett.add(cid)
+            alle[str(cid)] = {
+                "id": cid, "serial": c.get("serialNumber"),
+                "navn": c.get("name") or "", "epost": c.get("email") or "",
+                # Feltet heter orgno i XSALE. organizationNumber og
+                # orgNumber finnes ikke, så registeret lagret tom streng og
+                # org.nr-sok falt gjennom til en 53-sekunders skanning.
+                "orgnr": c.get("orgno") or "",
+                "status": c.get("status") or "",
             }
-            fallback = _api_get("/customercase/", params=fallback_params)
-            fallback_cases, _ = _extract_list(fallback, "customercase")
-            cases = [case for case in fallback_cases if needle in haystack(case)][:limit]
-            total = len(cases)
+        if len(rader) < SIDE:
+            break
+        side += 1
 
-    formatted = _format_cases(cases)
-    return json.dumps({"total": total, "query": query, "cases": formatted}, indent=2, ensure_ascii=False)
+    d = {
+        "bygget": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "totalt_meldt_av_xsale": totalt,
+        "antall_i_registeret": len(alle),
+        "dekning_prosent": round(len(alle) / float(totalt or 1) * 100, 1),
+        "kunder": list(alle.values()),
+    }
+    with io.open(CUSTOMER_INDEX_PATH, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, ensure_ascii=False, indent=1)
+    _customer_index = d
+    return json.dumps({k: v for k, v in d.items() if k != "kunder"},
+                      indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def search_cases(query: str, status: str = "ALL", limit: int = 50) -> str:
+    """Finner saker på kundenavn, saksnummer, e-post eller org.nr.
+
+    XSALEs egne tekstfiltre virker ikke (målt 21.09.2026: query, subject og
+    serialNumber returnerer alle hele saksmengden). Soket går derfor i tre
+    trinn, og rapporterer alltid hvilket som ble brukt:
+
+      1. Ser teksten ut som et saksnummer -> hent saken direkte.
+      2. Slaa opp kunden i det lokale registeret -> hent sakene via
+         customerId, som er et filter XSALE faktisk respekterer. Komplett.
+      3. Fritekst uten kundetreff -> avgrenset skanning av de sist oppdaterte
+         sakene, med eksplisitt rapport om hvor mye som ble gjennomsokt.
+
+    Et tomt svar sier ALLTID hva som ble sokt og hvor langt. Et "0 treff" som
+    kan forveksles med et faktum er verre enn en feilmelding - det var nettopp
+    slik den gamle versjonen meldte at en kunde med ti saker ikke fantes.
+
+    Args:
+        query: Kundenavn, saksnummer, e-post eller organisasjonsnummer.
+        status: "ACTIVE", "CLOSED" eller "ALL" (standard).
+        limit: Maks antall saker.
+    """
+    q = str(query or "").strip()
+    if not q:
+        return json.dumps({"error": "query er paakrevd."}, indent=2)
+
+    # --- 1. saksnummer ---------------------------------------------------
+    if re.fullmatch(r"\d{4,6}", q):
+        sak = json.loads(get_case_by_serial(int(q)))
+        if "error" not in sak:
+            return json.dumps({
+                "metode": "saksnummer",
+                "query": q,
+                "total": 1,
+                "cases": _format_cases([sak]),
+            }, indent=2, ensure_ascii=False)
+
+    # --- 2. via kunderegisteret ------------------------------------------
+    d, reg_feil = _load_customer_index()
+    kandidater = _match_kunder(q, (d or {}).get("kunder") or []) if d else []
+
+    if len(kandidater) == 1:
+        k = kandidater[0]
+        saker, tot = _cases_for_customer(k["id"], status=status, limit=limit)
+        return json.dumps({
+            "metode": "kunderegister -> customerId",
+            "query": q,
+            "kunde": k,
+            "status_filter": status,
+            "total": tot,
+            "komplett": True,
+            "cases": _format_cases(saker),
+        }, indent=2, ensure_ascii=False)
+
+    if len(kandidater) > 1:
+        return json.dumps({
+            "metode": "kunderegister",
+            "query": q,
+            "total": 0,
+            "flere_kunder_matchet": kandidater,
+            "merknad": ("Flere kunder matcher. Kall search_cases på nytt med "
+                        "et mer presist navn, eller bruk customerId-en "
+                        "direkte via list_cases_for_customer."),
+        }, indent=2, ensure_ascii=False)
+
+    # --- 3. avgrenset fritekstskanning -----------------------------------
+    needle = q.casefold()
+
+    def haystack(case):
+        kunde = case.get("customer") or {}
+        kontakt = case.get("contact") or {}
+        return " ".join([
+            str(case.get("serialNumber") or ""),
+            case.get("subject") or "", case.get("description") or "",
+            kunde.get("name", "") if isinstance(kunde, dict) else "",
+            kontakt.get("name", "") if isinstance(kontakt, dict) else "",
+            kontakt.get("email", "") if isinstance(kontakt, dict) else "",
+        ]).casefold()
+
+    SIDE, MAKS_SIDER = 1000, 3
+    sett, skannet, totalt_meldt = [], 0, None
+    for side in range(MAKS_SIDER):
+        filtre = []
+        if status and status != "ALL":
+            filtre.append({"property": "status", "value": status})
+        r = _api_get("/customercase/", params={
+            "page": side + 1, "start": side * SIDE, "limit": SIDE,
+            "filter": _build_filter(filtre) if filtre else _build_filter([]),
+            "sort": _build_sort([{"property": "updated", "direction": "DESC"}])})
+        rader, tot = _extract_list(r, "customercase")
+        if totalt_meldt is None:
+            totalt_meldt = tot
+        if not rader:
+            break
+        skannet += len(rader)
+        sett += [c for c in rader if needle in haystack(c)]
+        if len(sett) >= limit or len(rader) < SIDE:
+            break
+
+    svar = {
+        "metode": "avgrenset fritekstskanning",
+        "query": q,
+        "status_filter": status,
+        "skannet_saker": skannet,
+        "totalt_i_xsale": totalt_meldt,
+        "komplett": skannet >= (totalt_meldt or 0),
+        "total": len(sett[:limit]),
+        "cases": _format_cases(sett[:limit]),
+    }
+    if reg_feil:
+        svar["register_advarsel"] = reg_feil
+    if not sett:
+        svar["merknad"] = (
+            "0 TREFF - men bare %s av %s saker ble gjennomsøkt, sortert på "
+            "sist oppdatert. Dette er IKKE bevis for at saken ikke finnes. "
+            "Kjenner du kunden, bruk find_customer og deretter "
+            "list_cases_for_customer - den veien er komplett."
+            % (skannet, totalt_meldt))
+    return json.dumps(svar, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_cases_for_customer(customer_id: int, status: str = "ALL",
+                            limit: int = 100) -> str:
+    """Alle saker på en kunde. Komplett, via customerId.
+
+    Dette er den eneste søke-veien i XSALE som er bade rask og fullstendig,
+    fordi customerId er et filter API-et faktisk respekterer. Bruk
+    find_customer for å finne id-en.
+
+    Args:
+        customer_id: XSALE-kundens interne id (ikke kundenummeret).
+        status: "ACTIVE", "CLOSED" eller "ALL" (standard).
+        limit: Maks antall saker.
+    """
+    saker, tot = _cases_for_customer(customer_id, status=status, limit=limit)
+    navn = {(c.get("customer") or {}).get("name") for c in saker}
+    return json.dumps({
+        "customer_id": customer_id,
+        "kundenavn": sorted(n for n in navn if n),
+        "status_filter": status,
+        "total": tot,
+        "komplett": True,
+        "cases": _format_cases(saker),
+    }, indent=2, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1468,22 +2049,272 @@ def get_logged_user() -> str:
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
+def _text_signature(s) -> str:
+    """Tekstinnholdet i et HTML-felt, normalisert for sammenligning.
+
+    Brukes til å verifisere at en skrevet kommentar faktisk ligger på saken.
+    Vi sender HTML og XSALE normaliserer den videre, så rå strengsammenligning
+    treffer aldri. Ved å fjerne tagger, dekode entiteter og kollapse mellomrom
+    sammenligner vi det mennesket ser.
+    """
+    t = re.sub(r"<[^>]+>", " ", str(s or ""))
+    t = html_mod.unescape(t)
+    t = t.replace("\u00a0", " ")
+    t = re.sub(r"\s+", " ", t)
+    # Taggen gir et mellomrom der XSALE kanskje ikke har ett: "<b>Jalal</b>,"
+    # blir "Jalal ,". Skilletegn limes derfor tilbake mot ordet foran.
+    t = re.sub(r"\s+([,.;:!?%)\]])", r"\g<1>", t)
+    t = re.sub(r"([(\[])\s+", r"\g<1>", t)
+    return t.strip().casefold()
+
+
+# Ord som bare finnes fordi noen har skrevet norsk uten ae, oe og å.
+# Listen er bevisst kort og entydig: ingen av dem er engelske ord, og ingen
+# av dem er riktige norske ord. "lost" og "mate" står med vilje IKKE her -
+# de er vanlige engelske ord og ville gitt falske treff.
+TRANSLITTERERT_NORSK = {
+    "uroert": "urørt", "urort": "urørt", "utfort": "utført",
+    "utfores": "utføres", "sporsmal": "spørsmål", "arsak": "årsak",
+    "arsaken": "årsaken", "maned": "måned", "maneden": "måneden",
+    "overforing": "overføring", "overfort": "overført",
+    "dagsoppgjor": "dagsoppgjør", "oppgjor": "oppgjør",
+    "gjor": "gjør", "gjore": "gjøre", "kjop": "kjøp", "kjope": "kjøpe",
+    "kjoper": "kjøper", "lopende": "løpende", "forsok": "forsøk",
+    "forsoke": "forsøke", "vaere": "være", "paa": "på", "naa": "nå",
+    "maa": "må", "blabar": "blåbær", "apen": "åpen", "apne": "åpne",
+    "apnet": "åpnet", "forst": "først", "ogsa": "også", "ogsaa": "også",
+    "formalet": "formålet", "formal": "formål", "pamindelse": "påminnelse",
+    "paminnelse": "påminnelse", "tilbakeforing": "tilbakeføring",
+    "lost": None, "loste": "løste", "innforing": "innføring",
+    "godtgjorelse": "godtgjørelse", "sporre": "spørre", "sporres": "spørres",
+    "storrelse": "størrelse", "okning": "økning", "okt": "økt",
+    "arsrapport": "årsrapport", "arsoppgjor": "årsoppgjør",
+    "manedlig": "månedlig", "onsker": "ønsker", "onsket": "ønsket",
+    "nodvendig": "nødvendig", "mulighet": None, "lonn": "lønn",
+    "soke": "søke", "sokes": "søkes", "begrunnelse": None,
+    # Forledd daekkes ikke av suffiksregelen, saa de vanligste
+    # regnskapsordene staar eksplisitt.
+    "arsberetning": "årsberetning", "arsberetningen": "årsberetningen",
+    "arsregnskap": "årsregnskap", "arsregnskapet": "årsregnskapet",
+    "paminnelser": "påminnelser", "palopte": "påløpte",
+    "pavirker": "påvirker", "pakrevd": "påkrevd",
+}
+# Noen oppforinger over er None fordi de ER riktige ord - de står der bare
+# for at listen ikke skal vokse feil vei senere. De filtreres bort her.
+TRANSLITTERERT_NORSK = {k: v for k, v in TRANSLITTERERT_NORSK.items() if v}
+
+# Suffikser for sammensatte ord. "skriveverktoy" fanges ikke av en
+# hele-ord-liste, og sammensetning er normen i norsk fagsjargong. Hvert
+# suffiks er entydig: ingen engelske ord ender slik.
+TRANSLITTERERT_SUFFIKS = {
+    "verktoy": "verktøy", "oppgjor": "oppgjør", "sporsmal": "spørsmål",
+    "arsak": "årsak", "maned": "måned", "belop": "beløp",
+    "gebyr": None, "loype": "løype", "tilgjengelig": None,
+    "innstilling": None, "overforing": "overføring", "gjennomforing":
+    "gjennomføring", "utforing": "utføring", "storrelse": "størrelse",
+    "lonn": "lønn", "okning": "økning", "onske": "ønske",
+    "nivaa": "nivå", "nivaaet": "nivået", "nivaaer": "nivåer",
+}
+TRANSLITTERERT_SUFFIKS = {k: v for k, v in TRANSLITTERERT_SUFFIKS.items() if v}
+
+
+# Smaaord som finnes i all norsk prosa og ikke trenger ae, oe eller å.
+# Brukes til å kjenne igjen norsk tekst som mistenkelig mangler dem helt.
+_NORSKE_SMAAORD = ("og", "er", "ikke", "som", "det", "til", "med", "har",
+                   "kan", "den", "at", "vi", "de", "et", "en", "av", "om")
+
+
+def _finn_transliterert_norsk(tekst):
+    """Ord som ser ut som norsk skrevet uten ae, oe og å.
+
+    Returnerer (funn, mistenkelig_uten_tegn) der funn er en liste av
+    (feilstavet, riktig) og det andre er True når teksten ser norsk ut og
+    ikke har ett enkelt aeoea i seg.
+    """
+    raa = _text_signature(tekst)
+    ord_ = re.findall(r"[a-zæøå]+", raa)
+    funn = []
+    sett = set()
+    for o in ord_:
+        if o in sett:
+            continue
+        if o in TRANSLITTERERT_NORSK:
+            sett.add(o)
+            funn.append((o, TRANSLITTERERT_NORSK[o]))
+            continue
+        for suff, riktig in TRANSLITTERERT_SUFFIKS.items():
+            # Bare sammensetninger: selve ordet står i hovedlisten.
+            if o.endswith(suff) and len(o) > len(suff):
+                sett.add(o)
+                funn.append((o, o[:-len(suff)] + riktig))
+                break
+
+    har_tegn = any(c in raa for c in "æøå")
+    norske = sum(1 for o in set(ord_) if o in _NORSKE_SMAAORD)
+    mistenkelig = ((not har_tegn) and norske >= 4
+                   and (len(raa) >= 200 or bool(funn)))
+    return funn, mistenkelig
+
+
+def _norskvarsel(tekst):
+    """Advarselsobjekt, eller None når teksten ser greit ut."""
+    funn, mistenkelig = _finn_transliterert_norsk(tekst)
+    if not funn and not mistenkelig:
+        return None
+    ut = {}
+    if funn:
+        ut["feilstavede_ord"] = ["%s -> %s" % (a, b) for a, b in funn]
+    if mistenkelig:
+        ut["ingen_aeoeaa"] = (
+            "Teksten ser norsk ut og inneholder ikke ett enkelt ae, oe eller "
+            "aa. Det er nesten alltid transliterering.")
+    ut["forklaring"] = (
+        "XSALE lagrer æ, ø og å byte-identisk - målt på 558 og 457 tegn "
+        "21.09.2026. Det er ingen grunn til å transliterere. Skriv norsk "
+        "med riktige tegn.")
+    return ut
+
+
 def _to_xsale_html(text, raw_html=False):
     """Gjor ren tekst klar for XSALE sine note- og description-felter.
 
     Feltene lagres og rendres som HTML. Et vanlig linjeskift kollapser derfor
     til et mellomrom, og et notat skrevet med avsnitt vises som en eneste
-    sammenhengende blokk i grensesnittet. Escaper teksten og gjor linjeskift
+    sammenhengende blokk i grensesnittet. Escaper teksten og gjør linjeskift
     til <br>, slik at notatet leses slik det ble skrevet.
 
-    raw_html=True sender teksten urort, for de gangene formatering er onsket.
+    raw_html=True sender teksten urørt, for de gangene formatering er onsket.
     """
     if raw_html:
         return text
+    return _markdown_to_xsale_html(text)
+
+
+def _esc(s: str) -> str:
+    return (str(s or "").replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _inline(s: str) -> str:
+    """Escaper teksten og oversetter **fet** og `kode`.
+
+    Bevisst smalt utvalg. Enkel stjerne som kursiv er utelatt, fordi «5 * 3»
+    og «a*b» da ville blitt formatert ved et uhell. Fet og kode er det jeg
+    faktisk bruker, og begge har entydige avgrensere.
+    """
+    s = _esc(s)
+    s = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"`(?=\S)(.+?)(?<=\S)`", r"<code>\1</code>", s)
+    # markdown-lenke [tekst](url) -> klikkbar, men bare http(s)
+    s = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
+               r'<a href="\2">\1</a>', s)
+    return s
+
+
+def _markdown_to_xsale_html(text) -> str:
+    """Oversetter markdown til den HTML-en XSALE faktisk rendrer.
+
+    XSALE lagrer note- og description-felter som HTML. Den gamle versjonen
+    escapet alt og gjorde bare linjeskift til <br>, og da ble et strukturert
+    notat staaende som ren tekst: «**fet**» viste stjernene, en punktliste
+    viste bindestreker, og en tabell ble en vegg av roer. Det er den «rare
+    formateringen» kunden så i en paapensak.
+
+    Stotter det jeg faktisk skriver: overskrifter, fet, kode, lenker,
+    punktlister, nummererte lister, tabeller og skillelinjer. Alt annet
+    escapes og beholder linjeskiftene sine.
+    """
     s = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
-    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s.replace("\n", "<br>")
+    linjer = s.split("\n")
+    ut = []
+    i, n = 0, len(linjer)
+
+    def er_tabellrad(l):
+        return l.strip().startswith("|") and l.strip().endswith("|")
+
+    def celler(l):
+        return [c.strip() for c in l.strip().strip("|").split("|")]
+
+    while i < n:
+        l = linjer[i]
+        strippet = l.strip()
+
+        # tom linje -> avsnittsskille
+        if not strippet:
+            if ut and not ut[-1].endswith(("</ul>", "</ol>", "</table>",
+                                           "<hr>", "<br><br>")):
+                ut.append("<br>")
+            i += 1
+            continue
+
+        # skillelinje
+        if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", strippet):
+            ut.append("<hr>")
+            i += 1
+            continue
+
+        # overskrift -> fet linje. XSALE-notatfeltet er smalt, så <h2> blir
+        # unodig stort; fet + linjeskift leser bedre i praksis.
+        m = re.match(r"^(#{1,6})\s+(.*)$", strippet)
+        if m:
+            ut.append("<b>%s</b><br>" % _inline(m.group(2)))
+            i += 1
+            continue
+
+        # tabell: minst en rad, og neste linje er en skillerad
+        if er_tabellrad(l) and i + 1 < n and re.fullmatch(
+                r"\|[\s:|-]+\|", linjer[i + 1].strip()):
+            hode = celler(l)
+            i += 2
+            rader = []
+            while i < n and er_tabellrad(linjer[i]):
+                rader.append(celler(linjer[i]))
+                i += 1
+            t = ['<table border="1" cellpadding="4" cellspacing="0">']
+            t.append("<tr>%s</tr>" % "".join(
+                "<th align=\"left\">%s</th>" % _inline(c) for c in hode))
+            for r in rader:
+                t.append("<tr>%s</tr>" % "".join(
+                    "<td>%s</td>" % _inline(c) for c in r))
+            t.append("</table>")
+            ut.append("".join(t))
+            continue
+
+        # punktliste
+        if re.match(r"^[-*]\s+\S", strippet):
+            punkter = []
+            while i < n and re.match(r"^[-*]\s+\S", linjer[i].strip()):
+                punkter.append(re.sub(r"^[-*]\s+", "", linjer[i].strip()))
+                i += 1
+            ut.append("<ul>%s</ul>" % "".join(
+                "<li>%s</li>" % _inline(p) for p in punkter))
+            continue
+
+        # nummerert liste
+        if re.match(r"^\d+[.)]\s+\S", strippet):
+            punkter = []
+            while i < n and re.match(r"^\d+[.)]\s+\S", linjer[i].strip()):
+                punkter.append(re.sub(r"^\d+[.)]\s+", "", linjer[i].strip()))
+                i += 1
+            ut.append("<ol>%s</ol>" % "".join(
+                "<li>%s</li>" % _inline(p) for p in punkter))
+            continue
+
+        # vanlig tekstlinje
+        ut.append(_inline(l) + "<br>")
+        i += 1
+
+    html = "".join(ut)
+
+    # Luft etter blokkelementer. Uten dette klistrer neste avsnitt seg til
+    # tabellen eller lista - og naar XSALE vasker taggene for
+    # tidslinjevisningen smelter ordene sammen: «hardt mellomromFeltet
+    # orgno». Maalt paa sak 48638 og paa e-posten slik Outlook viser den.
+    html = re.sub(r"(</ul>|</ol>|</table>|<hr>)(?!<br>|$)",
+                  r"\g<1><br>", html)
+
+    html = re.sub(r"(<br>){3,}", "<br><br>", html)
+    return re.sub(r"(<br>)+$", "", html)
 
 EMAIL_ENTITY_KEYS = {"mailer", "headers", "bcc", "cc", "action"}
 
@@ -1546,6 +2377,7 @@ def get_case_emails(serial_number: int, include_bodies: bool = True) -> str:
         include_bodies: Read each e-mail in full. Costs one request per e-mail.
             False returns only sender, receiver, subject and direction.
     """
+    _mark_case_read(serial_number)
     case = json.loads(get_case_by_serial(serial_number))
     if case.get("error"):
         return json.dumps(case, indent=2, ensure_ascii=False)
@@ -1631,8 +2463,8 @@ def get_case_emails(serial_number: int, include_bodies: bool = True) -> str:
 # WRITE TOOLS
 #
 # Everything above this point is read-only. These two tools change data in
-# XSALE, and they act as the logged-in user, so that user's own name appears as
-# the author. They are deliberately narrow: creating a case and adding an internal
+# XSALE, and they act as the logged-in user, so Jalal's name appears as the
+# author. They are deliberately narrow: creating a case and adding an internal
 # comment. Closing, reopening, deleting, changing status and sending email are
 # NOT implemented - CLAUDE.md requires an explicit instruction for those, and
 # the field values involved have not been verified against the API.
@@ -1772,6 +2604,10 @@ def add_case_comment(serial_number: int, note: str, raw_html: bool = False) -> s
     if not str(note).strip():
         return json.dumps({"error": "note is required."}, indent=2)
 
+    nekt = _krev_nivaa("add_case_comment", "kommenter", serial_number)
+    if nekt:
+        return nekt
+
     case = json.loads(get_case_by_serial(serial_number))
     if "error" in case:
         return json.dumps({
@@ -1809,26 +2645,640 @@ def add_case_comment(serial_number: int, note: str, raw_html: bool = False) -> s
         }, indent=2, ensure_ascii=False)
 
     # Read the case back and confirm the note is actually on it.
+    #
+    # The comparison has to be on text content, not on the raw strings: we send
+    # HTML (the note is converted before the POST) and XSALE may normalise it
+    # further. Comparing the stored HTML against the original plain text never
+    # matched, so verified_on_case was reported false on comments that had in
+    # fact landed — a false alarm that made a successful write look failed.
     landed = False
     author = None
-    try:
-        fresh = json.loads(get_case_details(int(case_id)))
-        for rel in fresh.get("relation", []) or []:
-            if rel.get("type") == "INTERNAL" and (rel.get("note") or "").strip() == note.strip():
-                landed = True
-                author = rel.get("author")
-                break
-    except Exception:
-        pass
+    # Les relasjonen RAATT. get_case_details kjorer note gjennom clean_html,
+    # som stripper taggene og limer tabellcellene sammen, så en
+    # sammenligning mot den meldte false på kommentarer som la helt riktig.
+    # Malt pa kastesak 48638 21.09.2026.
+    sendt = payload["note"]
+    forventet = _text_signature(sendt)
+    for rel in _raa_relasjoner(case_id):
+        if rel.get("type") != "INTERNAL":
+            continue
+        lagret = rel.get("note") or ""
+        if lagret == sendt or _text_signature(lagret) == forventet:
+            landed = True
+            author = _name_from_person(rel.get("createdBy")
+                                       or rel.get("author") or {})
+            break
+
+    global _actions_done
+    _actions_done += 1
+    varsel = _norskvarsel(note)
+    _audit("add_case_comment", serial_number,
+           "verifisert=%s, %d tegn%s"
+           % (landed, len(str(note)),
+              ", TRANSLITTERERT NORSK" if varsel else ""))
 
     return json.dumps({
         "added": True,
         "verified_on_case": landed,
+        "sprakadvarsel": varsel,
         "serialNumber": serial_number,
         "case_id": case_id,
         "author": author,
         "note": note,
     }, indent=2, ensure_ascii=False)
+
+
+# --- Svar til kunde og statusendring --------------------------------------
+#
+# Rutene og feltnavnene under er LEST UT av XSALE sin egen aktivitetslogg
+# (/activity/, feltet route og changelog.groupedDiff), ikke gjettet. Malt
+# 21.09.2026 pa 626 aktiviteter:
+#
+#   POST /email/send                       35 treff, model=Customercase
+#   POST /customercase/<id>?sendEmail=false  statusendring, felt "status"
+#
+# Merk sendEmail=false: grensesnittet sender den eksplisitt. Uten den kan en
+# statusendring varsle kunden pa e-post.
+
+CASE_STATUSES = ("NEW", "ASSIGNED", "FEEDBACK", "ON_HOLD", "COMPLETED")
+CLOSED_STATUS = "COMPLETED"
+
+
+def _ser_ut_som_messageid(adresse):
+    """True for Message-ID-er som regexen forveksler med e-postadresser.
+
+    Malt på sak 48578 og 47910: inboundEmail inneholder headere, og en
+    Message-ID har samme form som en adresse. Kjennetegnene er en lang
+    heksadesimal lokaldel, eller et maskingenerert Exchange-domene.
+    """
+    a = str(adresse or "").lower()
+    if "@" not in a:
+        return True
+    lokal, _, domene = a.partition("@")
+    if len(lokal) >= 24 and re.fullmatch(r"[0-9a-f]+", lokal):
+        return True
+    if re.search(r"\.prod\.(outlook|exchangelabs)\.com$", domene):
+        return True
+    if re.fullmatch(r"[a-z]{2,4}\d?pr\d+mb\d+\..*", domene):
+        return True
+    return False
+
+
+def _case_epostadresser(serial_number, case_id=None):
+    """Adressene som hoerer til saken, med kilde.
+
+    Grunnlaget for mottakersperren. Tre kilder, i fallende tillit:
+    e-postkorrespondansen på saken, saken sitt replyTo, og kundekortet.
+
+    Feltene heter sender og receiver. Den første versjonen av denne
+    funksjonen leste get_case_details()["activity"], som ikke finnes, og ga
+    tom mengde for alle saker - også saker med elleve e-poster. Maalt mot
+    sak 48578.
+
+    Merk at en sak som kom inn per telefon har null e-postadresser. 48423 og
+    48556 er slike. Da må adressen hentes fra kundekortet og sendes med
+    allow_new_recipient=True.
+    """
+    kilder = {}
+
+    def legg_til(verdi, kilde):
+        for bit in re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", str(verdi or "")):
+            a = bit.strip().lower()
+            # Vaare egne inbound-adresser er ruting, ikke mottakere.
+            if ".inbound.xsale.no" in a:
+                continue
+            if _ser_ut_som_messageid(a):
+                continue
+            kilder.setdefault(a, kilde)
+
+    try:
+        for e in (json.loads(get_case_emails(serial_number)) or {}).get(
+                "emails", []) or []:
+            legg_til(e.get("sender"), "e-post på saken")
+            legg_til(e.get("receiver"), "e-post på saken")
+    except Exception:
+        pass
+
+    try:
+        d = json.loads(get_case_details(int(case_id))) if case_id else {}
+        legg_til(d.get("replyTo"), "saken sitt replyTo")
+        legg_til(d.get("inboundEmail"), "saken sin inboundEmail")
+        kunde = d.get("customer") or {}
+        for felt in ("email", "invoiceEmail"):
+            legg_til(kunde.get(felt), "kundekortet")
+    except Exception:
+        pass
+
+    return kilder
+
+@mcp.tool()
+def edit_case_comment(serial_number: int, comment_id: int, note: str,
+                      raw_html: bool = False, dry_run: bool = True) -> str:
+    """
+    Corrects an existing internal comment in place. Requires level 'kommenter'.
+
+    Verified on case 48638 21.09.2026: PUT /relation/<id> rewrites the comment
+    without creating a new one - the relation count stayed at 7 before and
+    after. Use this to fix a typo rather than stacking a correction comment on
+    top of it.
+
+    Comment ids come from get_case_details (the relation list).
+
+    Args:
+        serial_number: Case serial number, for the read gate and the audit log.
+        comment_id: The relation id of the comment to rewrite.
+        note: The new text. Markdown is converted, as in add_case_comment.
+        raw_html: Pass True to send markup through untouched.
+        dry_run: True (default) returns the payload without writing.
+    """
+    if not str(note).strip():
+        return json.dumps({"changed": False, "error": "note is required."},
+                          indent=2)
+
+    case = json.loads(get_case_by_serial(serial_number))
+    if "error" in case:
+        return json.dumps({"changed": False,
+                           "error": "Could not find case %s: %s"
+                                    % (serial_number, case["error"])},
+                          indent=2, ensure_ascii=False)
+    case_id = case.get("id")
+
+    gammel = None
+    for rel in _raa_relasjoner(case_id):
+        if str(rel.get("id")) == str(comment_id):
+            gammel = rel
+            break
+    if gammel is None:
+        return json.dumps({
+            "changed": False,
+            "error": "Comment %s was not found on case %s."
+                     % (comment_id, serial_number),
+            "kommentarer_paa_saken": [r.get("id")
+                                      for r in _raa_relasjoner(case_id)],
+        }, indent=2, ensure_ascii=False)
+
+    ny_html = _to_xsale_html(note, True) if raw_html \
+        else _markdown_to_xsale_html(note)
+    payload = {
+        "id": int(comment_id),
+        "model": "customercase",
+        "fk": int(case_id),
+        "type": gammel.get("type") or "INTERNAL",
+        "subtype": gammel.get("subtype") or "",
+        "note": ny_html,
+        "status": gammel.get("status") or "ACTIVE",
+    }
+
+    if dry_run:
+        return json.dumps({
+            "changed": False,
+            "dry_run": True,
+            "metode": "PUT",
+            "route": "/relation/%d" % int(comment_id),
+            "gammel_note": gammel.get("note"),
+            "ny_note": ny_html,
+            "sprakadvarsel": _norskvarsel(note),
+        }, indent=2, ensure_ascii=False)
+
+    nekt = _krev_nivaa("edit_case_comment", "kommenter", serial_number)
+    if nekt:
+        return nekt
+
+    for_antall = len(_raa_relasjoner(case_id))
+    result = _api_put("/relation/%d" % int(comment_id), payload=payload,
+                      params={"saveAsInternal": "true"})
+    if isinstance(result, dict) and result.get("success") is False:
+        _audit("edit_case_comment:AVVIST_AV_XSALE", serial_number,
+               result.get("message"))
+        return json.dumps({
+            "changed": False,
+            "error": "XSALE rejected the edit.",
+            "message": result.get("message"),
+            "sent_payload": payload,
+        }, indent=2, ensure_ascii=False)
+
+    # Les tilbake rått, og sjekk at det ikke ble laget en ny relasjon.
+    etter = _raa_relasjoner(case_id)
+    landed = False
+    for rel in etter:
+        if str(rel.get("id")) == str(comment_id):
+            landed = (rel.get("note") or "") == ny_html
+            break
+
+    global _actions_done
+    _actions_done += 1
+    varsel = _norskvarsel(note)
+    _audit("edit_case_comment", serial_number,
+           "kommentar %s, verifisert=%s%s"
+           % (comment_id, landed,
+              ", TRANSLITTERERT NORSK" if varsel else ""))
+
+    return json.dumps({
+        "changed": landed,
+        "comment_id": comment_id,
+        "serialNumber": serial_number,
+        "antall_kommentarer_for": for_antall,
+        "antall_kommentarer_etter": len(etter),
+        "ny_kommentar_laget": len(etter) != for_antall,
+        "sprakadvarsel": varsel,
+        "merknad": ("" if landed else
+                    "Kommentaren leses ikke tilbake som forventet. "
+                    "Kontroller i XSALE."),
+    }, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def reply_to_customer(serial_number: int, body: str, receiver: str,
+                      subject: str = "", cc: str = "",
+                      sender: str = "", dry_run: bool = True,
+                      allow_new_recipient: bool = False,
+                      tillat_ascii_norsk: bool = False) -> str:
+    """
+    Sends an e-mail reply to the customer on an XSALE case. SENDS REAL MAIL.
+
+    Requires autonomy level 'svar' or higher. dry_run defaults to True: the
+    exact payload is returned and nothing is sent, so the text and the
+    recipient can be checked before anything leaves the building.
+
+    The recipient must be an address belonging to the case, unless
+    allow_new_recipient=True. _case_epostadresser collects three sources, in
+    falling order of trust: the e-mail correspondence on the case, the case's
+    own replyTo and inboundEmail, and the customer card. An address that never
+    appeared in any correspondence therefore still passes if it is the
+    customer's registered or invoice address. The response names the source in
+    mottaker_kilde - read it before sending.
+
+    The customer card is reached through the case's own record, not through a
+    customer search. XSALE's /customer/ filter has silently returned the wrong
+    customer, and an address from there would not be trustworthy.
+
+    Args:
+        serial_number: Case serial number, e.g. 48423.
+        body: The reply. Markdown is converted to the HTML XSALE renders.
+        receiver: Recipient address. Checked against the addresses that
+            belong to the case - correspondence, replyTo, and the customer
+            card.
+        subject: Defaults to "Sv: <case subject> [Sak <serial>]".
+        cc: Optional copy recipients.
+        sender: Defaults to the logged-in user's address.
+        dry_run: True (default) returns the payload without sending.
+        allow_new_recipient: Set True to mail an address not on the case.
+        tillat_ascii_norsk: Norwegian written without æ, ø and å is refused,
+            because it reads as unprofessional to the customer and XSALE
+            stores the characters byte-identically anyway. Set True only when
+            the text is deliberately English or ASCII.
+    """
+    if not str(body).strip():
+        return json.dumps({"sent": False, "error": "body is required."},
+                          indent=2)
+    mottaker = str(receiver or "").strip().lower()
+    if "@" not in mottaker:
+        return json.dumps({"sent": False,
+                           "error": "receiver must be an e-mail address."},
+                          indent=2)
+
+    case = json.loads(get_case_by_serial(serial_number))
+    if "error" in case:
+        return json.dumps({"sent": False,
+                           "error": "Could not find case %s: %s"
+                                    % (serial_number, case["error"])},
+                          indent=2, ensure_ascii=False)
+    case_id = case.get("id")
+    if not case_id:
+        return json.dumps({"sent": False,
+                           "error": "Case %s has no internal id."
+                                    % serial_number}, indent=2)
+
+    kjente = _case_epostadresser(serial_number, case_id)
+    if mottaker not in kjente and not allow_new_recipient:
+        return json.dumps({
+            "sent": False,
+            "arsak": "mottaker ikke funnet i saken",
+            "receiver": mottaker,
+            "adresser_paa_saken": kjente,
+            "ingen_epost_paa_saken": not kjente,
+            "forklaring": (
+                "Adressen hører ikke til sak %s. Kjente adresser er "
+                "listet med kilde. Er saken meldt per telefon finnes ingen, "
+                "og da må adressen hentes fra kundekortet og sendes med "
+                "allow_new_recipient=True." % serial_number),
+        }, indent=2, ensure_ascii=False)
+
+    # En kunde som mottar "Formalet er a bekrefte" ser en useriøs avsender.
+    # XSALE lagrer æøå byte-identisk - målt på 558 og 457 tegn 21.09.2026 -
+    # så transliterering er aldri nødvendig, bare en vane. Internt gir det en
+    # advarsel; til kunde blir det stoppet.
+    varsel = _norskvarsel(body)
+    if varsel and not tillat_ascii_norsk:
+        return json.dumps({
+            "sent": False,
+            "arsak": "transliterert norsk",
+            "sprakadvarsel": varsel,
+            "forklaring": (
+                "Teksten ser ut som norsk skrevet uten æ, ø og å. Skriv den om "
+                "med riktige tegn. Er teksten engelsk eller bevisst ASCII, "
+                "send med tillat_ascii_norsk=True."),
+        }, indent=2, ensure_ascii=False)
+
+    avsender = str(sender or "").strip()
+    if not avsender:
+        try:
+            avsender = (json.loads(get_logged_user()) or {}).get("email") or ""
+        except Exception:
+            avsender = ""
+    if "@" not in avsender:
+        return json.dumps({
+            "sent": False,
+            "error": ("Could not determine the sender address. Pass sender= "
+                      "explicitly."),
+        }, indent=2)
+
+    emne = str(subject or "").strip()
+    if not emne:
+        emne = "Sv: %s [Sak %s]" % (case.get("subject") or "", serial_number)
+
+    # Feltnavnene her er trådfeltene, ikke kolonnenavnene i basen.
+    # Aktivitetsloggen viser body/receiver/sender fordi det er det LAGREDE
+    # navnet; API-et vil ha content og to. Og "to" må være en liste - som
+    # streng svarer XSALE "to should not be blank" selv om feltet er fylt ut.
+    # Malt på kastesak 48638 21.09.2026.
+    payload = _bygg_epost_payload(case_id, emne,
+                                  _markdown_to_xsale_html(body),
+                                  mottaker, cc)
+
+    if dry_run:
+        return json.dumps({
+            "sent": False,
+            "dry_run": True,
+            "sprakadvarsel": _norskvarsel(body),
+            "route": "/email/send",
+            "payload": payload,
+            "avsender_settes_av_xsale": True,
+            # mottaker_kilde er den eneste sannhetskilden om mottakeren.
+            # Her sto ogsaa mottaker_bekreftet_paa_saken, som var
+            # `mottaker in kjente` - men den meldte true ogsaa naar kilden var
+            # kundekortet, og mottaker_kilde sier strengt mer: den navngir
+            # kilden, eller "ikke paa saken". To felt som kan sprike er verre
+            # enn ett. Fjernet 21.09.2026; den hadde ingen konsumenter.
+            "mottaker_kilde": kjente.get(mottaker) or "ikke på saken",
+            "merknad": ("Ingenting er sendt. Kall pa nytt med dry_run=False "
+                        "for a sende."),
+        }, indent=2, ensure_ascii=False)
+
+    nekt = _krev_nivaa("reply_to_customer", "svar", serial_number)
+    if nekt:
+        return nekt
+
+    result = _api_post("/email/send", payload=payload)
+    if isinstance(result, dict) and result.get("success") is False:
+        _audit("reply_to_customer:AVVIST_AV_XSALE", serial_number,
+               result.get("message"))
+        return json.dumps({
+            "sent": False,
+            "error": "XSALE rejected the e-mail.",
+            "message": result.get("message"),
+            "errors": result.get("errors"),
+            "sent_payload": payload,
+        }, indent=2, ensure_ascii=False)
+
+    # Les saken tilbake og bekreft at e-posten faktisk ligger der.
+    # Hent e-posten RAATT. get_case_emails kjorer kroppen gjennom clean_html
+    # - målt til 522 mot 1002 tegn på e-post 12771211 - og vaskeren limer
+    # tabellcellene sammen, så signaturene kan ikke sammenlignes.
+    landed, epost_id = False, None
+    sendt = payload["content"]
+    forventet = _text_signature(sendt)
+    try:
+        for e in (json.loads(get_case_emails(serial_number)) or {}).get(
+                "emails", []) or []:
+            if str(e.get("direction") or "") != "outbound":
+                continue
+            raa = _raa_epost(e.get("id"))
+            lagret = raa.get("body") or ""
+            if lagret == sendt or _text_signature(lagret) == forventet:
+                landed, epost_id = True, e.get("id")
+                break
+    except Exception:
+        pass
+
+    global _actions_done
+    _actions_done += 1
+    _audit("reply_to_customer", serial_number,
+           "til=%s, verifisert=%s, %d tegn" % (mottaker, landed, len(body)))
+
+    return json.dumps({
+        "sent": True,
+        "verified_on_case": landed,
+        "email_id": epost_id,
+        "serialNumber": serial_number,
+        "case_id": case_id,
+        "receiver": mottaker,
+        "sender": avsender,
+        "subject": emne,
+        "merknad": ("verified_on_case=false betyr at e-posten ikke ble "
+                    "gjenfunnet på saken enda, ikke sikkert at den feilet. "
+                    "Kontroller i XSALE." if not landed else ""),
+    }, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_case_status(serial_number: int, status: str, comment: str = "",
+                    dry_run: bool = True, notify_customer: bool = False) -> str:
+    """
+    Changes the status of an XSALE case. WRITES DATA.
+
+    Requires autonomy level 'full'. dry_run defaults to True.
+
+    Valid statuses, measured on 2000 live cases: NEW, ASSIGNED, FEEDBACK,
+    ON_HOLD, COMPLETED. Closing a case means COMPLETED.
+
+    Uses PUT, not POST. POST /customercase/<id> ignores the id in the path and
+    creates a NEW case, answering success:true with "Sak opprettet" - measured
+    three times on TESTKUNDE. The id has to travel in the payload.
+
+    Eleven fields ride along besides status. Omitting priority blanks it;
+    omitting customerId gets "Kunne ikke finne kunde". description is
+    deliberately not sent - it is unnecessary, and echoing it back is the one
+    remaining way to overwrite the case HTML with a cleaned value.
+
+    After writing, every field is read back and compared. Only status may have
+    changed; anything else is reported as damage.
+
+    Args:
+        serial_number: Case serial number.
+        status: One of NEW, ASSIGNED, FEEDBACK, ON_HOLD, COMPLETED.
+        comment: Optional internal comment written before the change, so the
+            case records why.
+        dry_run: True (default) returns the payload without writing.
+        notify_customer: False (default) sends ?sendEmail=false, which is what
+            the XSALE UI does. True can e-mail the customer.
+    """
+    st = str(status or "").strip().upper()
+    if st not in CASE_STATUSES:
+        return json.dumps({
+            "changed": False,
+            "error": "Unknown status %r. Valid: %s"
+                     % (status, ", ".join(CASE_STATUSES)),
+        }, indent=2, ensure_ascii=False)
+
+    case = json.loads(get_case_by_serial(serial_number))
+    if "error" in case:
+        return json.dumps({"changed": False,
+                           "error": "Could not find case %s: %s"
+                                    % (serial_number, case["error"])},
+                          indent=2, ensure_ascii=False)
+    case_id = case.get("id")
+    if not case_id:
+        return json.dumps({"changed": False,
+                           "error": "Case %s has no internal id."
+                                    % serial_number}, indent=2)
+
+    forut = _raa_sak(case_id)
+    if not forut:
+        return json.dumps({"changed": False,
+                           "error": "Could not read case %s raw."
+                                    % serial_number}, indent=2)
+    fra = forut.get("status")
+
+    # En PUT som setter status til det den allerede er, endrer ingenting og
+    # ser like vellykket ut som en ekte endring. close_case pa en sak som alt
+    # var COMPLETED gjorde nettopp det - malt 21.09.2026 pa kastesak 48638,
+    # der torrkjoringen meldte COMPLETED -> COMPLETED uten a si fra.
+    # Kontrollen ligger foran dry_run med vilje: den som torrkjorer skal faa
+    # vite at kallet ikke ville endret noe.
+    if fra == st:
+        har_kommentar = bool(str(comment or "").strip())
+        if not dry_run:
+            _audit("set_case_status:UENDRET", serial_number,
+                   "sto allerede i %s" % st)
+        return json.dumps({
+            "changed": False,
+            "allerede_i_status": True,
+            "fra_status": fra,
+            "til_status": st,
+            "serialNumber": serial_number,
+            "case_id": int(case_id),
+            "kommentar_skrevet": False,
+            "merknad": (
+                "Saken står allerede i %s. Ingen PUT er sendt. %s"
+                % (st, "Kommentaren er ikke skrevet - bruk add_case_comment "
+                       "hvis den likevel skal inn." if har_kommentar
+                       else "Ingen kommentar var oppgitt.")),
+        }, indent=2, ensure_ascii=False)
+
+    payload = _bygg_status_payload(forut, st)
+    payload["id"] = int(case_id)
+    params = {"sendEmail": "true" if notify_customer else "false"}
+
+    if dry_run:
+        return json.dumps({
+            "changed": False,
+            "dry_run": True,
+            "metode": "PUT",
+            "route": "/customercase/%d" % int(case_id),
+            "params": params,
+            "payload": payload,
+            "fra_status": fra,
+            "til_status": st,
+            "merknad": ("Ingenting er endret. Kall pa nytt med dry_run=False."),
+        }, indent=2, ensure_ascii=False)
+
+    nekt = _krev_nivaa("set_case_status", "full", serial_number)
+    if nekt:
+        return nekt
+
+    if str(comment or "").strip():
+        add_case_comment(serial_number, comment)
+
+    result = _api_put("/customercase/%d" % int(case_id),
+                      payload=payload, params=params)
+    if isinstance(result, dict) and result.get("success") is False:
+        _audit("set_case_status:AVVIST_AV_XSALE", serial_number,
+               result.get("message"))
+        return json.dumps({
+            "changed": False,
+            "error": "XSALE rejected the status change.",
+            "message": result.get("message"),
+            "errors": result.get("errors"),
+            "sent_payload": payload,
+        }, indent=2, ensure_ascii=False)
+
+    # Les hele posten tilbake. "success" alene er ikke bevis - POST svarte
+    # success:true på noe helt annet enn det jeg ba om.
+    etter = _raa_sak(case_id) or {}
+    hopp = ("updated", "updatedBy", "updatedByExternalContact",
+            "updatedByExternalCustomer", "updatedByExternalFk",
+            "updatedByExternalModel")
+    endret = sorted(k for k in set(forut) | set(etter)
+                    if k not in hopp and forut.get(k) != etter.get(k))
+    uventet = [k for k in endret if k != "status"]
+    blanket = [k for k in uventet
+               if forut.get(k) not in (None, "", [], {})
+               and etter.get(k) in (None, "", [], {})]
+
+    global _actions_done
+    _actions_done += 1
+    _audit("set_case_status", serial_number,
+           "%s -> %s, lest tilbake %s, uventet %s"
+           % (fra, st, etter.get("status"), uventet or "ingen"))
+
+    ok = etter.get("status") == st and not uventet
+    return json.dumps({
+        "changed": ok,
+        "fra_status": fra,
+        "til_status": st,
+        "lest_tilbake": etter.get("status"),
+        "serialNumber": serial_number,
+        "case_id": case_id,
+        "endrede_felt": endret,
+        "uventet_endret": uventet,
+        "blankede_felt": blanket,
+        "notify_customer": notify_customer,
+        "merknad": ("" if ok else
+                    "Kontroller saken i XSALE. Status leses som %r, og disse "
+                    "feltene endret seg uventet: %s"
+                    % (etter.get("status"), uventet or "ingen")),
+    }, indent=2, ensure_ascii=False)
+
+
+
+@mcp.tool()
+def close_case(serial_number: int, comment: str = "",
+               dry_run: bool = True) -> str:
+    """
+    Closes an XSALE case by setting status COMPLETED. Requires level 'full'.
+
+    A thin wrapper over set_case_status. dry_run defaults to True.
+
+    A case that is already COMPLETED is reported back untouched. No PUT is
+    sent, because setting the status to what it already is changes nothing
+    while looking exactly like a real change. Any comment is then NOT written
+    either, and the response says so.
+
+    Case 38306 was closed with "migrated to the new platform" while five of
+    six reported points were unverified, and the customer stayed unhappy for
+    a year. Write what was actually verified in the comment.
+
+    Args:
+        serial_number: Case serial number.
+        comment: Internal comment explaining the resolution. Strongly advised.
+        dry_run: True (default) returns the payload without writing.
+    """
+    svar = set_case_status(serial_number, CLOSED_STATUS, comment=comment,
+                           dry_run=dry_run, notify_customer=False)
+    try:
+        d = json.loads(svar)
+    except Exception:
+        return svar
+    if not d.get("allerede_i_status"):
+        return svar
+
+    # Samme tilstand, men «allerede lukket» er det den som lukker skal lese.
+    d["allerede_lukket"] = True
+    d["merknad"] = d.get("merknad", "").replace(
+        "Saken står allerede i %s." % CLOSED_STATUS,
+        "Saken er allerede lukket (%s)." % CLOSED_STATUS, 1)
+    return json.dumps(d, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":

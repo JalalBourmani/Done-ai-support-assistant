@@ -1,3 +1,4 @@
+import html
 import os
 import re
 import requests
@@ -71,6 +72,49 @@ def parse_total_rows(html_content: str):
     except ValueError:
         return None
 
+def parse_truncated_columns(html_content: str) -> list:
+    """Column names whose values phpMyAdmin clipped, if any.
+
+    A clipped cell carries class="... truncated" on its <td>, and the header
+    order tells us which column it belongs to. Returns [] when nothing was
+    clipped, which is the normal case once pftext=F is sent.
+    """
+    table_match = re.search(
+        r'<table[^>]*class="[^"]*table_results[^"]*"[^>]*>(.*?)</table>',
+        html_content, re.DOTALL)
+    if not table_match:
+        return []
+    table = table_match.group(1)
+    if "truncated" not in table:
+        return []
+
+    # Header names, in order, skipping phpMyAdmin's own action columns.
+    thead = re.search(r'<thead[^>]*>(.*?)</thead>', table, re.DOTALL)
+    names = []
+    if thead:
+        # Capture attributes AND content: print_ignore lives in the attributes,
+        # so matching on the content alone let the action column into the list
+        # and shifted every index by one.
+        for attrs, inner in re.findall(r'<th([^>]*)>(.*?)</th>',
+                                       thead.group(1), re.DOTALL):
+            if "print_ignore" in attrs:
+                continue
+            label = clean_html(inner)
+            if label:
+                names.append(label)
+
+    ramt = set()
+    for row in re.findall(r'<tr[^>]*>(.*?)</tr>', table, re.DOTALL):
+        idx = 0
+        for td in re.findall(r'<td([^>]*)>', row):
+            if "print_ignore" in td:
+                continue
+            if "truncated" in td:
+                ramt.add(names[idx] if idx < len(names) else "kolonne %d" % idx)
+            idx += 1
+    return sorted(ramt)
+
+
 def get_session():
     """Establishes or retrieves the cached phpMyAdmin session and token."""
     global session, token_post
@@ -135,6 +179,60 @@ def clear_session():
     session = None
     token_post = None
 
+def strip_string_literals(query: str):
+    """Blank out quoted literals and identifiers, keeping the SQL skeleton.
+
+    Returns (skeleton, balanced). The skeleton has every `'...'`, `"..."` and
+    `` `...` `` replaced by an empty pair of the same quotes, so the keyword and
+    semicolon checks see only real SQL.
+
+    This exists because scanning the raw text rejects ordinary reporting
+    queries. Measured 21.09.2026, all four are harmless SELECTs:
+
+        WHERE COLUMN_NAME LIKE '%delete%'      -> DELETE matched inside a literal
+        WHERE client_name LIKE '%Call%'        -> CALL matched ('%' is a boundary)
+        LIKE '%"stockUpdate";b:1%'             -> the ';' read as a 2nd statement
+        WHERE comment LIKE '%kl. 14:30; ok%'   -> same
+
+    The semicolon case is the one that hurts: every PHP-serialised column in
+    ProTouch (request_string, pos_settings_string, category_settings_string) is
+    full of semicolons, and those are exactly the columns worth querying.
+
+    Blanking literals makes the guard stricter as well as less annoying — a
+    keyword hidden in a literal can no longer confuse it in either direction.
+    And it removes the incentive to write CONCAT('stock','Upd','ate') to get
+    past the check, which is the genuinely dangerous outcome: a guard that
+    teaches people to obfuscate SQL protects nothing.
+    """
+    out = []
+    i, n = 0, len(query)
+    quote = None
+    while i < n:
+        c = query[i]
+        if quote is None:
+            if c in ("'", '"', "`"):
+                quote = c
+                out.append(c)
+            else:
+                out.append(c)
+            i += 1
+            continue
+        # inside a literal: consume until the matching close quote
+        if c == "\\" and i + 1 < n:
+            i += 2                      # backslash escape, e.g. \' or \\
+            continue
+        if c == quote:
+            if i + 1 < n and query[i + 1] == quote:
+                i += 2                  # doubled quote escape, e.g. '' or ""
+                continue
+            out.append(c)
+            quote = None
+            i += 1
+            continue
+        i += 1                          # ordinary character inside the literal
+    return "".join(out), quote is None
+
+
 def is_safe_query(query: str) -> bool:
     """Verifies that the query is read-only (SELECT, SHOW, DESCRIBE, EXPLAIN)."""
     # Clean whitespace and comments
@@ -145,15 +243,29 @@ def is_safe_query(query: str) -> bool:
     if not clean_query:
         return False
 
+    # Analyse the skeleton, never the literals. Execution still uses the
+    # original query — only the inspection runs on this copy.
+    skeleton, balanced = strip_string_literals(clean_query)
+    if not balanced:
+        # An unterminated quote is never a valid query, and it would let the
+        # rest of the statement hide inside a literal that never closes.
+        return False
+
+    # Collapse whitespace runs. Without this, "INTO  OUTFILE" with two spaces
+    # walks straight past the \bINTO OUTFILE\b pattern — as do a tab and a
+    # newline. Measured 21.09.2026: INTO OUTFILE writes a file to the server
+    # filesystem, so that was a write escaping a read-only guard.
+    skeleton = re.sub(r"\s+", " ", skeleton).strip()
+
     # Allow a single trailing semicolon, but reject multiple statements.
-    if clean_query.endswith(";"):
-        clean_query = clean_query[:-1].strip()
-    if ";" in clean_query:
+    if skeleton.endswith(";"):
+        skeleton = skeleton[:-1].strip()
+    if ";" in skeleton:
         return False
 
     # Check if query starts with approved read-only commands
     allowed_commands = ("SELECT", "SHOW", "DESCRIBE", "EXPLAIN")
-    if not clean_query.startswith(allowed_commands):
+    if not skeleton.startswith(allowed_commands):
         return False
 
     blocked_keywords = (
@@ -161,8 +273,10 @@ def is_safe_query(query: str) -> bool:
         "GRANT", "REVOKE", "CALL", "LOAD", "LOAD_FILE", "INTO OUTFILE",
         "INTO DUMPFILE", "LOCK", "UNLOCK", "SET",
     )
-    if any(re.search(rf"\b{re.escape(keyword)}\b", clean_query) for keyword in blocked_keywords):
+    if any(re.search(rf"\b{re.escape(keyword)}\b", skeleton) for keyword in blocked_keywords):
         return False
+
+    clean_query = skeleton
 
     # REPLACE and INSERT are DML statements *and* ordinary string functions.
     # Blocking the bare word rejects perfectly safe reporting queries such as
@@ -176,8 +290,21 @@ def is_safe_query(query: str) -> bool:
     )
 
 def clean_html(text: str) -> str:
-    """Strips HTML tags and cleans up whitespace."""
+    """Strips HTML tags, decodes entities and cleans up whitespace.
+
+    The entity decoding matters more than it looks. phpMyAdmin escapes cell
+    values for display, so a JSON column comes back as
+    {&quot;amount&quot;:&quot;7215.85&quot;} — six characters for every quote.
+    Without decoding, the caller is handed something that reads like the value
+    but is not: json.loads() fails, string comparisons miss, and a 1 020
+    character field measures 1 900.
+
+    Every consumer had to remember html.unescape() on its own, and forgetting
+    it failed quietly. Doing it once, here, is the only place it cannot be
+    forgotten.
+    """
     text = re.sub(r'<[^>]+>', ' ', text)
+    text = html.unescape(text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -256,23 +383,47 @@ def parse_pma_table(html_content: str) -> list:
     return results
 
 @mcp.tool()
-def execute_query(sql_query: str) -> str:
+def execute_query(sql_query: str, database: str = "") -> str:
     """
     Executes a read-only SQL query on the database.
     Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are permitted.
 
+    Args:
+        sql_query: The query to run.
+        database: Optional database to run it against, e.g.
+            "protouch_client_569_1557578336". Defaults to DB_NAME from
+            config.env. ProTouch keeps one database per client, so without
+            this every client query would have to fully qualify each table
+            name — and information_schema lookups would need TABLE_SCHEMA too.
+
     Returns a JSON array of row objects.
+
+    EVERY VALUE IS A STRING. The results are scraped from phpMyAdmin's HTML,
+    which carries no type information, so COUNT(*) returns "0" and is_active
+    returns "1". Note that "0" is truthy in Python and "0" != 0, so cast with
+    int()/float() before comparing or summing. Values are deliberately NOT
+    coerced here: ProTouch receipt numbers and product numbers have leading
+    zeros ("001000000001"), and guessing a type would destroy them.
 
     If the result had to be truncated, a JSON *object* is returned instead:
     {"truncated": true, "total_rows": N, "returned_rows": M, "warning": "...",
      "rows": [...]}. Treat that as an incomplete answer — narrow the query or
      aggregate in SQL rather than reasoning about the partial rows.
+
+    The same shape with "truncated_columns" means individual values were
+    clipped rather than rows dropped.
     """
     if not is_safe_query(sql_query):
         return "Error: Only read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN) are allowed."
 
     base_url = os.getenv("PMA_URL", "https://ws.tellix.no/phpmyadmin/")
-    db_name = os.getenv("DB_NAME", "protouch")
+    db_name = (database or "").strip() or os.getenv("DB_NAME", "protouch")
+    # The database name goes into a phpMyAdmin POST field, not into SQL, but a
+    # stray quote or slash there would still be nonsense. MySQL identifiers are
+    # letters, digits, underscore and dollar.
+    if not re.fullmatch(r"[A-Za-z0-9_$]+", db_name):
+        return (f"Error: {db_name!r} is not a valid database name. Expected "
+                "letters, digits, underscore or dollar only.")
 
     # Try executing the query (max 2 attempts to handle potential session expiry)
     for attempt in range(2):
@@ -297,6 +448,18 @@ def execute_query(sql_query: str) -> str:
             # Without this, phpMyAdmin returns its default page size of 25 rows
             # and gives no indication that anything was left out.
             'session_max_rows': str(max_rows()),
+            # Full column values instead of phpMyAdmin's clipped preview.
+            #
+            # Measured 21.09.2026: a 1 020-character request_string came back as
+            # 68 characters, ending in "..." so the value looked complete. That
+            # is 93 % of the content gone, with no flag and no warning — the
+            # same failure mode as the 25-row page size, one level down.
+            #
+            # It forced a whole chunking workaround all week: read the value in
+            # 26-character slices with SUBSTRING and a numbers table, then glue
+            # them back together. This one field removes all of that.
+            'pftext': 'F',
+            'display_options[pftext]': 'F',
         }
 
         try:
@@ -317,11 +480,47 @@ def execute_query(sql_query: str) -> str:
             message_html = res.get('message', '')
             results = parse_pma_table(message_html)
             if not results:
-                # Could be a successful query with 0 rows
+                # A clean zero-row answer and a failed parse are completely
+                # different facts, and this branch used to conflate them:
+                # phpMyAdmin says "MySQL returned an empty result set (i.e.
+                # zero rows)", which matched neither "0 rows" nor "Empty
+                # result" — the latter only by case. So EVERY empty result was
+                # reported as a parse failure, and "nothing found" was
+                # indistinguishable from "the tool broke".
                 clean_msg = clean_html(message_html)
-                if any(x in clean_msg for x in ["executed successfully", "0 rows", "Empty result"]):
+                low = clean_msg.lower()
+                empty_markers = (
+                    "empty result",        # "returned an empty result set"
+                    "zero rows",           # "(i.e. zero rows)"
+                    "0 rows",
+                    "executed successfully",
+                )
+                if any(x in low for x in empty_markers):
                     return "Query executed successfully. 0 rows returned."
-                return f"Query executed successfully, but result table could not be parsed. Message: {clean_msg}"
+                return (
+                    "Query executed successfully, but the result table could not "
+                    f"be parsed — treat this as an UNKNOWN result, not as zero "
+                    f"rows. Message: {clean_msg}"
+                )
+
+            # Belt and braces on the full-text request above. If a future
+            # phpMyAdmin ever ignores pftext, clipped values must not slip
+            # through silently a second time.
+            clipped = parse_truncated_columns(message_html)
+            if clipped:
+                return json.dumps({
+                    "truncated": True,
+                    "truncated_columns": clipped,
+                    "returned_rows": len(results),
+                    "warning": (
+                        "INCOMPLETE VALUES: phpMyAdmin clipped these columns "
+                        f"despite the full-text request: {', '.join(clipped)}. "
+                        "The strings look complete but are not. Re-read the "
+                        "affected column with SUBSTRING in slices, and verify "
+                        "each slice against CHAR_LENGTH."
+                    ),
+                    "rows": results,
+                }, indent=2, default=str)
 
             # Compare against the total phpMyAdmin reports. Returning fewer rows
             # than matched has to be impossible to overlook — a quietly clipped

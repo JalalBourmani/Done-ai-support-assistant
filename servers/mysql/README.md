@@ -2,7 +2,7 @@
 
 Dette er en tilpasset Model Context Protocol (MCP) server som gir sikker, skrivebeskyttet (read-only) tilgang til en MySQL/MariaDB database ved å fungere som en HTTP-bro (bridge) mot phpMyAdmin. Dette løser problemet med at direkte databasetilkobling (f.eks. port 3308) er blokkert bak en brannmur.
 
-Serveren kjører som MCP-server i Claude Code, og lar deg kjøre trygge SQL-spørringer direkte fra samtalen.
+MCP-server mot ProTouch-databasen gjennom phpMyAdmin. Skrivebeskyttet. Kjøres av `scripts/run-mcp.ps1 -Server mysql`.
 
 ## Funksjoner
 - **Skrivebeskyttet sikkerhet:** Bare SELECT, SHOW, DESCRIBE og EXPLAIN-spørringer tillates. Alle endringsspørringer (som INSERT, UPDATE, DELETE, DROP) blokkeres automatisk av serveren før de i det hele tatt sendes til phpMyAdmin.
@@ -18,7 +18,7 @@ Serveren kjører som MCP-server i Claude Code, og lar deg kjøre trygge SQL-spø
 phpMyAdmin viser **25 rader per side** som standard, og svaret inneholder ingen indikasjon på at noe
 er utelatt. En spørring som treffer 1 570 rader ser derfor ut som et fullstendig svar med 25 rader.
 
-Det førte til feilkonklusjoner i en reell sak, der hendelsesvinduet hadde 38 rader og
+Det førte til feilkonklusjoner i sak 46939 (THANCA), der hendelsesvinduet hadde 38 rader og
 `product`-tabellens 45 kolonner ble vist som 25.
 
 Serveren håndterer dette på to nivåer:
@@ -53,33 +53,42 @@ kommando og ikke kan inneholde et andre statement.
 
 ## Installasjon
 
-Avhengighetene installeres av settet, fra den pinnede `requirements.txt` i
-repo-roten — ikke per server:
-
-```powershell
-.\scripts\install.ps1
-```
+1. Sørg for at Python 3 er installert på din maskin.
+2. Installer nødvendige avhengigheter i denne mappen:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ---
 
-## Konfigurasjon
+## Registrering i Claude Code
 
-Du skal normalt ikke konfigurere denne serveren manuelt. Den startes av settet:
+Serveren startes av settets launcher, ikke av en IDE-konfigurasjon:
 
 ```powershell
 .\scripts\run-mcp.ps1 -Server mysql
 ```
 
-`run-mcp.ps1` henter `DB_USER` og `DB_PASSWORD` DPAPI-kryptert fra `secrets\mysql.xml` og setter dem
-som miljøvariabler i serverprosessen. Ingenting havner på disk i klartekst, og `generated\mcp.json`
-inneholder aldri legitimasjon — bare stien til oppstartsskriptet.
+Den henter legitimasjonen DPAPI-kryptert fra `secrets\mysql.xml` og setter
+`DB_USER` og `DB_PASSWORD` som prosessvariabler. Legitimasjonen legges inn med
+`.\scripts\oppsett.ps1 -Bare mysql`.
 
-Legitimasjonen legges inn med `.\scripts\oppsett.ps1`, som også tester innloggingen før den lagrer.
+I `.mcp.json` i arbeidsområdet:
 
-> **Skriv aldri et reelt passord inn i en konfigurasjonsfil.** Verken her, i `config.env` eller i
-> `.mcp.json`. Alle tre ligger i eller ved et Git-repo.
+```json
+"mysql-query-server": {
+  "type": "stdio",
+  "command": "powershell.exe",
+  "args": [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    "<sti til settet>\\scripts\\run-mcp.ps1", "-Server", "mysql"
+  ]
+}
+```
 
----
+Erstatt `<sti til settet>` med din egen utsjekking. **Skriv aldri passordet i en
+konfigurasjonsfil** — det leses fra miljøet og skal komme dit via launcheren.
+
 
 ## Miljøvariabler
 
