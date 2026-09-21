@@ -3,11 +3,16 @@
 Verktoyene er de samme i alle tre. Det som skiller er hvor langt handlingene
 rekker, og hvem som leser dem for kunden gjor det.
 
-| Modus | Prompt | Autonominivaa | Ender i |
+| Modus | Styres av | Autonominivaa | Ender i |
 |---|---|---|---|
 | **Planlagt ko**, uovervaket | `auto-xsale-saksassistent.md` | irrelevant — se under | filer paa disk |
-| **Samtale**, utkastmodus | `auto-xsale-saksassistent.md` | `les` eller `kommenter` | filer paa disk |
+| **Samtale**, utkastmodus | `CLAUDE.md` | `les` eller `kommenter` | filer paa disk |
 | **Samtale**, delegert | `auto-xsale-delegert.md` | `svar` eller `full` | handlinger i XSALE |
+
+Det er bare to promptfiler her, og det er med vilje. `auto-xsale-saksassistent.md`
+lastes **kun** av `scripts\run-auto-xsale.ps1`; i en samtale laster ingenting den.
+Utkastmodus trenger ingen egen prompt fordi reglene alt staar i `CLAUDE.md` — en
+tredje fil ville duplisert den, og duplikater divergerer.
 
 ## Planlagt ko
 
@@ -26,7 +31,13 @@ hvitelisten endres — ikke noe et hevet autonominivaa gjor av seg selv.
 Slik vi har jobbet hele veien. Jeg undersoker, kommenterer internt, og skriver
 `troubleshooting.md` og `draft_reply.md`. Du leser i frontenden og sender selv.
 
-Standardnivaaet er `les`, saa dette er det du faar uten aa gjore noe.
+**Ingen prompt lastes.** `CLAUDE.md` i arbeidsmappen styrer dette — den skrives
+av `install.ps1` fra `templates\CLAUDE.md.template`. Standardnivaaet er `les`,
+saa utkastmodus er det du faar uten aa gjore noe.
+
+Du kan gjerne be meg ta en konkret sak, eller se paa koen. Forskjellen fra den
+planlagte koen er at du er til stede: jeg kan spore, og vi kan ta opp en sak vi
+alt har behandlet uten at det bryter noen regel.
 
 ## Delegert modus
 
