@@ -35,9 +35,40 @@ const LABELS: Record<string, string> = {
   "case_raw.json": "Rådata (XSALE)",
 };
 
+/**
+ * Datostemplede filer fra oppfølgingsrunden. `draft_reply.md` og
+ * `troubleshooting.md` overskrives aldri — nye funn og nye utkast kommer som
+ * egne filer med dato, så de må gjenkjennes på prefiks framfor eksakt navn.
+ */
+const DATED: Array<{ prefix: string; label: string; order: number }> = [
+  { prefix: "draft_reply_", label: "Svarutkast", order: 2.5 },
+  { prefix: "oppfolging_", label: "Oppfølging", order: 2.8 },
+];
+
+function datedMatch(name: string) {
+  return DATED.find((d) => name.startsWith(d.prefix) && name.endsWith(".md"));
+}
+
+/** Trekk ut datoen så den kan vises ved siden av etiketten. */
+function datedSuffix(name: string, prefix: string): string {
+  return name.slice(prefix.length).replace(/\.md$/, "").replace(/_/g, " ");
+}
+
+function labelOf(f: CaseFile): string {
+  const known = LABELS[f.name];
+  if (known) return known;
+  const d = datedMatch(f.name);
+  if (d) return `${d.label} ${datedSuffix(f.name, d.prefix)}`;
+  return f.name;
+}
+
 /** Documents first, then loose files, then attachments — photos read last. */
 function orderOf(f: CaseFile): number {
-  return ORDER[f.name] ?? (f.kind === "image" ? 6 : 5);
+  const known = ORDER[f.name];
+  if (known !== undefined) return known;
+  const d = datedMatch(f.name);
+  if (d) return d.order;
+  return f.kind === "image" ? 6 : 5;
 }
 
 function sortFiles(files: CaseFile[]): CaseFile[] {
@@ -198,7 +229,7 @@ export default function FileViewer({
                   <IconFile width={15} height={15} style={{ flexShrink: 0, opacity: 0.7 }} />
                 )}
                 <span className="fi-name" title={f.name}>
-                  {LABELS[f.name] ?? f.name}
+                  {labelOf(f)}
                 </span>
                 <span className="fi-meta">{formatBytes(f.size)}</span>
               </button>

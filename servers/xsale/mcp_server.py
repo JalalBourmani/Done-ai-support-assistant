@@ -1498,8 +1498,8 @@ def get_installation_context(serial_number: int) -> str:
 AUTONOMY_LEVELS = ("les", "kommenter", "svar", "full")
 AUTONOMY_DESC = {
     "les": "bare lesing - alle skrivinger avvises",
-    "kommenter": "interne kommentarer; kundesvar og lukking krever Jalal",
-    "svar": "interne kommentarer og kundesvar; lukking krever Jalal",
+    "kommenter": "interne kommentarer; kundesvar og lukking krever godkjenning",
+    "svar": "interne kommentarer og kundesvar; lukking krever godkjenning",
     "full": "også lukking - helautonomt",
 }
 DEFAULT_AUTONOMY = "les"
@@ -1560,7 +1560,7 @@ def _krev_nivaa(handling, kreves, serial):
             "naavaerende_nivaa": na,
             "kreves": kreves,
             "forklaring": (
-                "Nivået er '%s' (%s). Handlingen '%s' krever '%s'. Jalal kan "
+                "Nivået er '%s' (%s). Handlingen '%s' krever '%s'. Brukeren kan "
                 "heve nivået med set_autonomy('%s'), eller godkjenne denne "
                 "ene handlingen manuelt."
                 % (na, AUTONOMY_DESC[na], handling, kreves, kreves)),
@@ -1608,7 +1608,7 @@ def get_autonomy() -> str:
 
 @mcp.tool()
 def set_autonomy(level: str, begrunnelse: str = "") -> str:
-    """Setter autonominivå. SKAL bare kalles når Jalal ber om det.
+    """Setter autonominivå. SKAL bare kalles når brukeren ber om det.
 
     Nivaaene, fra minst til mest inngripende:
       les       - bare lesing
@@ -2463,7 +2463,7 @@ def get_case_emails(serial_number: int, include_bodies: bool = True) -> str:
 # WRITE TOOLS
 #
 # Everything above this point is read-only. These two tools change data in
-# XSALE, and they act as the logged-in user, so Jalal's name appears as the
+# XSALE, and they act as the logged-in user, so that user's name appears as the
 # author. They are deliberately narrow: creating a case and adding an internal
 # comment. Closing, reopening, deleting, changing status and sending email are
 # NOT implemented - CLAUDE.md requires an explicit instruction for those, and
