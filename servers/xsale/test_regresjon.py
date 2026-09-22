@@ -728,7 +728,7 @@ def test_blokkluft_gir_ikke_trippel_br():
 # mottakeren; kundekortet er reserven når kontakten mangler e-post.
 #
 # Bekreftet empirisk på sak 48661, der de to har ULIKE domener
-# (albatrossfitness.no mot albatrossenter.no) og kollegaen sendte til
+# (kontakten og kundekortet laa paa ulike domener) og kollegaen sendte til
 # kontaktpersonen.
 #
 # Regelen så riktig ut på 48661 og var brukket på tre av fem reelle saker:
@@ -820,7 +820,7 @@ def test_ekte_ekstern_avsender_gir_konflikt(monkeypatch):
     ("louise.lagergren@amendo.no", True),
     ("noreply@kunde.no", True),
     ("kari@kunde.no", False),
-    ("ingunn@albatrossfitness.no", False),
+    ("ingunn@kundedomene.no", False),
 ])
 def test_gjenkjenner_egne_adresser(monkeypatch, adresse, egen):
     monkeypatch.setattr(X, "_egne_domener_cache",
