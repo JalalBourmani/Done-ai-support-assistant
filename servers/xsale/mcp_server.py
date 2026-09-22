@@ -214,7 +214,8 @@ def _bygg_status_payload(raa_sak, ny_status):
     return p
 
 
-def _bygg_epost_payload(case_id, emne, innhold_html, mottaker, cc=""):
+def _bygg_epost_payload(case_id, emne, innhold_html, mottaker, cc="",
+                        reply_to=""):
     """Payloaden /email/send godtar.
 
     Feltnavnene er trådfeltene, ikke kolonnenavnene. Aktivitetsloggen viser
@@ -233,6 +234,16 @@ def _bygg_epost_payload(case_id, emne, innhold_html, mottaker, cc=""):
         "content": innhold_html,
         "to": [str(mottaker)],
     }
+    # replyTo ble glemt i forste versjon. Uten det satte XSALE Reply-To til
+    # support@plorea.com, og kundens svar ville landet i den generelle
+    # innboksen uten kobling til saken. Grensesnittets egne sendinger far
+    # support+<serienr>@plorea.inbound.xsale.no. Malt 22.09.2026, og
+    # verifisert ved aa sende feltet - da endret headeren seg.
+    #
+    # Aktivitetsloggen kunne ikke svare paa dette: replyTo er ingen kolonne
+    # paa e-posttabellen og vises derfor ikke i changelog.
+    if str(reply_to or "").strip():
+        p["replyTo"] = str(reply_to).strip()
     kopi = [a.strip() for a in re.split(r"[;,]", str(cc or "")) if a.strip()]
     if kopi:
         p["cc"] = kopi
@@ -3193,9 +3204,19 @@ def reply_to_customer(serial_number: int, body: str, receiver: str = "",
     # navnet; API-et vil ha content og to. Og "to" må være en liste - som
     # streng svarer XSALE "to should not be blank" selv om feltet er fylt ut.
     # Malt på kastesak 48638 21.09.2026.
+    # Sakens egen svaradresse, hentet fra saken framfor bygget av
+    # serienummeret - saa den foelger XSALE om formatet endres. Uten den
+    # treder ikke kundens svar tilbake paa saken.
+    svaradresse = ""
+    try:
+        svaradresse = ((json.loads(get_case_details(int(case_id))) or {})
+                       .get("replyTo") or {}).get("email") or ""
+    except Exception:
+        svaradresse = ""
+
     payload = _bygg_epost_payload(case_id, emne,
                                   _markdown_to_xsale_html(body),
-                                  mottaker, cc)
+                                  mottaker, cc, svaradresse)
 
     if dry_run:
         return json.dumps({
