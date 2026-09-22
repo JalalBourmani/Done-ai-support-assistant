@@ -68,7 +68,7 @@ function Sett-Config([string] $nokkel, [string] $verdi) {
     if (-not (Test-Path -LiteralPath $sti)) {
         Copy-Item (Join-Path $script:KitRoot "config.env.example") $sti
     }
-    $linjer = @(Get-Content -LiteralPath $sti)
+    $linjer = @(Get-Content -Encoding UTF8 -LiteralPath $sti)
     $funnet = $false
     for ($i = 0; $i -lt $linjer.Count; $i++) {
         if ($linjer[$i] -match "^\s*$([regex]::Escape($nokkel))\s*=") {

@@ -40,7 +40,7 @@ function Import-ConfigEnv {
         throw "Mangler $configPath. Kjor scripts\install.ps1 forst."
     }
 
-    foreach ($line in Get-Content -LiteralPath $configPath) {
+    foreach ($line in Get-Content -Encoding UTF8 -LiteralPath $configPath) {
         $trimmed = $line.Trim()
         if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
         $parts = $trimmed.Split("=", 2)
@@ -99,7 +99,7 @@ function Write-ClaudeMd {
     )
 
     $malPath = Join-Path $script:KitRoot "templates\CLAUDE.md.template"
-    $mal = Get-Content -Raw -LiteralPath $malPath
+    $mal = Get-Content -Raw -Encoding UTF8 -LiteralPath $malPath
     $mal = $mal.
         Replace("__USER_NAME__", $Navn).
         Replace("__AUTO_XSALE_DIR__", $AutoXsaleDir)

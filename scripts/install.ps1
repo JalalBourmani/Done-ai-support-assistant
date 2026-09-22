@@ -115,7 +115,7 @@ Import-ConfigEnv
 
 # Stier settes her, aldri i den delte eksempelfila.
 function Sett-Config([string] $nokkel, [string] $verdi) {
-    $linjer = @(Get-Content -LiteralPath $configPath)
+    $linjer = @(Get-Content -Encoding UTF8 -LiteralPath $configPath)
     $funnet = $false
     for ($i = 0; $i -lt $linjer.Count; $i++) {
         if ($linjer[$i] -match "^\s*$([regex]::Escape($nokkel))\s*=") {
@@ -152,7 +152,7 @@ if ([string]::IsNullOrWhiteSpace($env:TASK_LEDGER)) {
 
 # --- mcp.json ---------------------------------------------------------------
 Trinn "MCP-konfigurasjon"
-$mcpTemplate = Get-Content -Raw -LiteralPath (Join-Path $script:KitRoot "templates\mcp.json.template")
+$mcpTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:KitRoot "templates\mcp.json.template")
 $mcpJson = $mcpTemplate.Replace("__KIT_ROOT__", $script:KitRoot.Replace("\", "\\"))
 $generatedMcp = Join-Path $script:KitRoot "generated\mcp.json"
 Set-Content -LiteralPath $generatedMcp -Value $mcpJson -Encoding utf8
@@ -160,7 +160,7 @@ Write-Host "  Generert: generated\mcp.json"
 
 # Kontroller at hver -File-sti i den genererte konfigurasjonen finnes. En
 # feilstavet sti gir ellers en MCP-server som bare aldri starter.
-$konf = Get-Content -Raw -LiteralPath $generatedMcp | ConvertFrom-Json
+$konf = Get-Content -Raw -Encoding UTF8 -LiteralPath $generatedMcp | ConvertFrom-Json
 foreach ($navn in $konf.mcpServers.PSObject.Properties.Name) {
     $argv = $konf.mcpServers.$navn.args
     for ($i = 0; $i -lt $argv.Count; $i++) {

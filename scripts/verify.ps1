@@ -142,7 +142,7 @@ Sjekk "Autentisert" {
 Sjekk "generated\mcp.json" {
     $p = Join-Path $script:KitRoot "generated\mcp.json"
     if (-not (Test-Path -LiteralPath $p)) { throw "Mangler. Kjor install.ps1." }
-    $k = Get-Content -Raw -LiteralPath $p | ConvertFrom-Json
+    $k = Get-Content -Raw -Encoding UTF8 -LiteralPath $p | ConvertFrom-Json
     $navn = @($k.mcpServers.PSObject.Properties.Name)
     foreach ($n in $navn) {
         $argv = $k.mcpServers.$n.args

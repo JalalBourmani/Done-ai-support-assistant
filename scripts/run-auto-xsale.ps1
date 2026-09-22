@@ -71,7 +71,9 @@ if ([string]::IsNullOrWhiteSpace($taskLedger)) {
     $taskLedger = Join-Path $autoXsaleRoot "task.md"
 }
 
-$prompt = Get-Content -Raw -LiteralPath $promptPath
+# Uten -Encoding leser PS 5.1 en UTF-8-fil uten BOM som ANSI, og
+# tankestrekene og gaaseoynene i prompten kommer inn som soppel.
+$prompt = Get-Content -Raw -Encoding UTF8 -LiteralPath $promptPath
 $prompt = $prompt.
     Replace('${AUTO_XSALE_ROOT}', $autoXsaleRoot).
     Replace('${SERVERS_ROOT}', $serversRoot).
