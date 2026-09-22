@@ -3111,7 +3111,21 @@ def set_case_status(serial_number: int, status: str, comment: str = "",
             case records why.
         dry_run: True (default) returns the payload without writing.
         notify_customer: False (default) sends ?sendEmail=false, which is what
-            the XSALE UI does. True can e-mail the customer.
+            the XSALE UI does.
+
+            True sends ?sendEmail=true, and as far as we can measure it does
+            NOTHING on a status change. Tested on case 48638 22.09.2026:
+            no e-mail record on the case (four before and after), no email
+            entity in the activity log, and nothing in the requester's inbox
+            - and the requester was also the watcher, so the most likely
+            recipient of any notification.
+
+            Do not read `isEmailed` in the activity log as evidence either
+            way. It is 1 on all 249 activities checked, regardless of route.
+
+            The parameter is kept because the route accepts it and XSALE may
+            use it for other transitions, but do not rely on it to inform a
+            customer. Send an actual reply with reply_to_customer instead.
     """
     st = str(status or "").strip().upper()
     if st not in CASE_STATUSES:

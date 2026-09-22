@@ -59,8 +59,15 @@ Rapporten kommer fra `autonomy_report()` og
 `${AUTO_XSALE_ROOT}/_delegert-rapport.md`. Den forteller ogsaa hva som IKKE ble
 gjort, og hvilket kriterium som stoppet det.
 
-## Ikke avklart enda
+## Avklart 22.09.2026: varsling ved lukking
 
-`notify_customer=True` paa `set_case_status` er aldri testet. Vi har bare kjort
-`sendEmail=false`, saa ingen vet hva kunden faktisk mottar naar en sak lukkes
-med varsling. Avklar det for delegert modus brukes paa en reell sak.
+`notify_customer=True` paa `set_case_status` gjor **ingenting** saa langt vi kan
+maale. Testet paa kastesak 48638: ingen e-post paa saken, ingen email-entitet i
+aktivitetsloggen, og ingenting i innboksen til rekvirenten - som ogsaa var
+vokter, altsaa den mest sannsynlige mottakeren.
+
+`close_case` kan uansett ikke varsle; den sender alltid `sendEmail=false`.
+
+**Konsekvens for delegert modus:** en lukking informerer ikke kunden av seg
+selv. Skal kunden vite at saken er losst, maa du sende et svar med
+`reply_to_customer` foer du lukker.
