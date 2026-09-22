@@ -2724,20 +2724,100 @@ def _ser_ut_som_messageid(adresse):
     return False
 
 
+# Domenene vaare. En adresse herfra er oss, ikke en kunde, og skal aldri
+# kunne bli mottaker av et kundesvar.
+#
+# amendo.no staar med fordi det er det gamle merkenavnet og fortsatt i bruk i
+# eldre saker. Den innloggede brukerens eget domene legges til dynamisk, saa
+# listen foelger med om firmaet bytter domene igjen.
+EGNE_DOMENER = {"plorea.com", "amendo.no", "done.ai"}
+
+# Lokaldeler som er funksjonspostkasser, ikke personer.
+FUNKSJONSADRESSER = {"support", "noreply", "no-reply", "postmaster",
+                     "mailer-daemon", "bounce"}
+
+
+_egne_domener_cache = None
+
+
+def _egne_domener():
+    """Domenene som er oss. Caches - dette kalles per adresse.
+
+    Forste versjon slo opp get_logged_user() hver gang, altsaa ett
+    nettverkskall per kandidatadresse i en loekke. Maalt 22.09.2026: fem
+    saker tok over sju minutter i stedet for sekunder.
+    """
+    global _egne_domener_cache
+    if _egne_domener_cache is None:
+        d = set(EGNE_DOMENER)
+        try:
+            egen = (json.loads(get_logged_user()) or {}).get("email") or ""
+            if "@" in egen:
+                d.add(egen.split("@", 1)[1].strip().lower())
+        except Exception:
+            pass
+        _egne_domener_cache = d
+    return _egne_domener_cache
+
+
+def _er_egen_adresse(adresse):
+    """True for adresser som er OSS, ikke kunden.
+
+    Malt 22.09.2026: uten denne ble support@plorea.com valgt som mottaker paa
+    sak 48638, og meldt som «siste innkommende» paa tre andre saker - fordi
+    interne varselkopier av vaar egen utgaaende post klassifiseres som
+    innkommende.
+    """
+    a = str(adresse or "").strip().lower()
+    if "@" not in a:
+        return False
+    lokal, _, domene = a.partition("@")
+    if domene in _egne_domener():
+        return True
+    if lokal in FUNKSJONSADRESSER:
+        return True
+    return False
+
+
+# Mottakerkilder i fallende prioritet. Jalals regel 22.09.2026:
+# kontaktpersonen er den autoritative mottakeren, og kundekortet er reserven
+# for saker uten kontakt-e-post.
+#
+# Bekreftet paa sak 48661, der kontaktpersonen og kundekortet har ULIKE
+# domener (albatrossfitness.no mot albatrossenter.no) og kollegaen sendte til
+# kontaktpersonens adresse.
+MOTTAKER_PRIORITET = (
+    "kontaktperson",
+    "siste innkommende",
+    "e-post paa saken",
+    "kundekortet",
+    "kundekortets fakturaadresse",
+)
+
+
+def _case_kontakt(detalj):
+    """Kontaktpersonen som er knyttet til saken, eller None.
+
+    Saken peker med contactId inn i kundens kontaktliste. Er contactId null,
+    er det ingen kontakt paa saken selv om kunden har flere registrert.
+    """
+    kid = detalj.get("contactId")
+    if not kid:
+        return None
+    for c in ((detalj.get("customer") or {}).get("contacts") or []):
+        if str(c.get("id")) == str(kid):
+            return c
+    return None
+
+
 def _case_epostadresser(serial_number, case_id=None):
-    """Adressene som hoerer til saken, med kilde.
+    """Adressene som hoerer til saken, med kilde, i fallende prioritet.
 
-    Grunnlaget for mottakersperren. Tre kilder, i fallende tillit:
-    e-postkorrespondansen på saken, saken sitt replyTo, og kundekortet.
+    Rekkefoelgen staar i MOTTAKER_PRIORITET og er uttalt med vilje - den laa
+    tidligere implisitt i hvilken kilde som ble lest foerst.
 
-    Feltene heter sender og receiver. Den første versjonen av denne
-    funksjonen leste get_case_details()["activity"], som ikke finnes, og ga
-    tom mengde for alle saker - også saker med elleve e-poster. Maalt mot
-    sak 48578.
-
-    Merk at en sak som kom inn per telefon har null e-postadresser. 48423 og
-    48556 er slike. Da må adressen hentes fra kundekortet og sendes med
-    allow_new_recipient=True.
+    En sak som kom inn per telefon og mangler kontakt-e-post har bare
+    kundekortet. 48423 og 48556 er slike.
     """
     kilder = {}
 
@@ -2749,27 +2829,90 @@ def _case_epostadresser(serial_number, case_id=None):
                 continue
             if _ser_ut_som_messageid(a):
                 continue
-            kilder.setdefault(a, kilde)
+            # Egne adresser beholdes for aa kunne gjenkjennes av sperren, men
+            # merkes «oss» - en kilde som ikke staar i MOTTAKER_PRIORITET og
+            # derfor aldri velges som mottaker.
+            merke = "oss" if _er_egen_adresse(a) else kilde
+            if a not in kilder:
+                kilder[a] = merke
+            elif kilder[a] == "oss" and merke != "oss":
+                kilder[a] = merke
 
+    detalj = {}
     try:
-        for e in (json.loads(get_case_emails(serial_number)) or {}).get(
-                "emails", []) or []:
-            legg_til(e.get("sender"), "e-post på saken")
-            legg_til(e.get("receiver"), "e-post på saken")
+        detalj = json.loads(get_case_details(int(case_id))) if case_id else {}
     except Exception:
-        pass
+        detalj = {}
 
+    # 1. Kontaktpersonen paa saken - hoyeste prioritet.
+    kontakt = _case_kontakt(detalj)
+    if kontakt:
+        legg_til(kontakt.get("email"), "kontaktperson")
+
+    # 2. Den som sist skrev inn. Man svarer i en traad til avsenderen.
     try:
-        d = json.loads(get_case_details(int(case_id))) if case_id else {}
-        legg_til(d.get("replyTo"), "saken sitt replyTo")
-        legg_til(d.get("inboundEmail"), "saken sin inboundEmail")
-        kunde = d.get("customer") or {}
-        for felt in ("email", "invoiceEmail"):
-            legg_til(kunde.get(felt), "kundekortet")
+        poster = (json.loads(get_case_emails(serial_number)) or {}).get(
+            "emails", []) or []
     except Exception:
-        pass
+        poster = []
+    # Bare EKSTERNE avsendere. Interne varselkopier av vaar egen utgaaende
+    # post kommer tilbake som «inbound_or_notice», og uten dette filteret ble
+    # support@plorea.com meldt som «den som sist skrev inn».
+    innkommende = [e for e in poster
+                   if str(e.get("direction") or "") != "outbound"
+                   and not _er_egen_adresse(e.get("sender"))]
+    for e in reversed(innkommende):
+        legg_til(e.get("sender"), "siste innkommende")
+
+    # 3. Resten av korrespondansen.
+    for e in poster:
+        legg_til(e.get("sender"), "e-post paa saken")
+        legg_til(e.get("receiver"), "e-post paa saken")
+
+    # 4. Kundekortet - reserven naar kontakten mangler e-post.
+    kunde = detalj.get("customer") or {}
+    legg_til(kunde.get("email"), "kundekortet")
+    legg_til(kunde.get("invoiceEmail"), "kundekortets fakturaadresse")
+
+    # 5. Ruting, lavest. Tas med for aa kunne gjenkjenne adressen, ikke for
+    #    aa sende til den.
+    legg_til(detalj.get("replyTo"), "saken sitt replyTo")
+    legg_til(detalj.get("inboundEmail"), "saken sin inboundEmail")
 
     return kilder
+
+
+def _anbefalt_mottaker(serial_number, case_id=None):
+    """Hvem et svar boer gaa til, og hva som taler mot.
+
+    Returnerer (adresse, kilde, konflikt). Konflikt er satt naar den siste
+    som skrev inn er en ANNEN enn kontaktpersonen - da velger ikke koden
+    stille, den sier fra. I delegert modus er det grunn til aa la saken staa.
+    """
+    kilder = _case_epostadresser(serial_number, case_id)
+    if not kilder:
+        return None, None, "saken har ingen e-postadresse i det hele tatt"
+
+    valgt = kilde = None
+    for p in MOTTAKER_PRIORITET:
+        for a, k in kilder.items():
+            if k == p:
+                valgt, kilde = a, k
+                break
+        if valgt:
+            break
+    if not valgt:
+        # Bare ruteadresser igjen. De skal ikke brukes som mottaker.
+        return None, None, ("bare ruteadresser paa saken (replyTo/inbound), "
+                            "ingen reell mottaker")
+
+    konflikt = None
+    sisteinn = [a for a, k in kilder.items() if k == "siste innkommende"]
+    if kilde == "kontaktperson" and sisteinn and valgt not in sisteinn:
+        konflikt = ("kontaktpersonen er %s, men den som sist skrev inn er %s. "
+                    "Avgjor hvem svaret skal til foer du sender."
+                    % (valgt, ", ".join(sisteinn)))
+    return valgt, kilde, konflikt
 
 @mcp.tool()
 def edit_case_comment(serial_number: int, comment_id: int, note: str,
@@ -2888,7 +3031,7 @@ def edit_case_comment(serial_number: int, comment_id: int, note: str,
 
 
 @mcp.tool()
-def reply_to_customer(serial_number: int, body: str, receiver: str,
+def reply_to_customer(serial_number: int, body: str, receiver: str = "",
                       subject: str = "", cc: str = "",
                       sender: str = "", dry_run: bool = True,
                       allow_new_recipient: bool = False,
@@ -2900,13 +3043,30 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
     exact payload is returned and nothing is sent, so the text and the
     recipient can be checked before anything leaves the building.
 
-    The recipient must be an address belonging to the case, unless
-    allow_new_recipient=True. _case_epostadresser collects three sources, in
-    falling order of trust: the e-mail correspondence on the case, the case's
-    own replyTo and inboundEmail, and the customer card. An address that never
-    appeared in any correspondence therefore still passes if it is the
-    customer's registered or invoice address. The response names the source in
-    mottaker_kilde - read it before sending.
+    receiver may be left empty, and then it is derived. The rule is Jalal's,
+    22.09.2026: the contact person's e-mail is the authoritative recipient,
+    and the customer card is the fallback when the contact has none. Verified
+    on case 48661, where the two hold DIFFERENT domains
+    (albatrossfitness.no vs albatrossenter.no) and the colleague who answered
+    sent to the contact person.
+
+    Priority is in MOTTAKER_PRIORITET and is explicit on purpose - it used to
+    sit implicitly in whichever source happened to be read first.
+
+    Our own addresses can never be chosen. They stay in the candidate list so
+    the guard still recognises them, but under the source "oss". Without that,
+    support@plorea.com was picked as the recipient on case 48638, and was
+    reported as "the last one who wrote in" on three other cases - XSALE
+    returns internal notification copies of our own outbound mail as inbound.
+
+    When the last EXTERNAL sender differs from the contact person, nothing is
+    sent. The conflict is reported instead, because the code should not pick
+    between two plausible recipients on its own. In delegated mode that is a
+    reason to leave the case alone.
+
+    An address that is passed explicitly must still belong to the case, unless
+    allow_new_recipient=True. The response names the source in mottaker_kilde
+    and says whether it was derived - read both before sending.
 
     The customer card is reached through the case's own record, not through a
     customer search. XSALE's /customer/ filter has silently returned the wrong
@@ -2915,9 +3075,9 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
     Args:
         serial_number: Case serial number, e.g. 48423.
         body: The reply. Markdown is converted to the HTML XSALE renders.
-        receiver: Recipient address. Checked against the addresses that
-            belong to the case - correspondence, replyTo, and the customer
-            card.
+        receiver: Recipient address. Leave empty to derive it by the rule
+            above. When given, it is checked against the addresses that
+            belong to the case.
         subject: Defaults to "Sv: <case subject> [Sak <serial>]".
         cc: Optional copy recipients.
         sender: Defaults to the logged-in user's address.
@@ -2932,10 +3092,7 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
         return json.dumps({"sent": False, "error": "body is required."},
                           indent=2)
     mottaker = str(receiver or "").strip().lower()
-    if "@" not in mottaker:
-        return json.dumps({"sent": False,
-                           "error": "receiver must be an e-mail address."},
-                          indent=2)
+    utledet = False
 
     case = json.loads(get_case_by_serial(serial_number))
     if "error" in case:
@@ -2948,6 +3105,40 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
         return json.dumps({"sent": False,
                            "error": "Case %s has no internal id."
                                     % serial_number}, indent=2)
+
+    # Utled mottakeren naar den ikke er oppgitt. I delegert modus finnes det
+    # ingen som kan oppgi den, saa regelen maa staa i koden: kontaktpersonen
+    # foerst, kundekortet som reserve. Jalals regel 22.09.2026, bekreftet paa
+    # sak 48661 der de to adressene har ulike domener.
+    if not mottaker:
+        anbefalt, anbefalt_kilde, anbefalt_konflikt = _anbefalt_mottaker(
+            serial_number, case_id)
+        if not anbefalt:
+            return json.dumps({
+                "sent": False,
+                "arsak": "ingen mottaker kunne utledes",
+                "forklaring": anbefalt_konflikt,
+                "adresser_paa_saken": _case_epostadresser(serial_number,
+                                                          case_id),
+            }, indent=2, ensure_ascii=False)
+        if anbefalt_konflikt:
+            return json.dumps({
+                "sent": False,
+                "arsak": "uklar mottaker",
+                "forklaring": anbefalt_konflikt,
+                "kontaktperson": anbefalt,
+                "adresser_paa_saken": _case_epostadresser(serial_number,
+                                                          case_id),
+                "merknad": ("Oppgi receiver eksplisitt naar du har avgjort. "
+                            "I delegert modus er dette grunn til aa la saken "
+                            "staa."),
+            }, indent=2, ensure_ascii=False)
+        mottaker, utledet = anbefalt, True
+
+    if "@" not in mottaker:
+        return json.dumps({"sent": False,
+                           "error": "receiver must be an e-mail address."},
+                          indent=2)
 
     kjente = _case_epostadresser(serial_number, case_id)
     if mottaker not in kjente and not allow_new_recipient:
@@ -3021,6 +3212,7 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
             # kilden, eller "ikke paa saken". To felt som kan sprike er verre
             # enn ett. Fjernet 21.09.2026; den hadde ingen konsumenter.
             "mottaker_kilde": kjente.get(mottaker) or "ikke på saken",
+            "mottaker_utledet": utledet,
             "merknad": ("Ingenting er sendt. Kall pa nytt med dry_run=False "
                         "for a sende."),
         }, indent=2, ensure_ascii=False)
@@ -3073,6 +3265,9 @@ def reply_to_customer(serial_number: int, body: str, receiver: str,
         "serialNumber": serial_number,
         "case_id": case_id,
         "receiver": mottaker,
+        "mottaker_kilde": _case_epostadresser(serial_number, case_id).get(
+            mottaker) or "ikke paa saken",
+        "mottaker_utledet": utledet,
         "sender": avsender,
         "subject": emne,
         "merknad": ("verified_on_case=false betyr at e-posten ikke ble "

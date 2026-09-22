@@ -25,9 +25,15 @@ mindre viktig — den er det eneste grunnlaget brukeren har for aa forstaa hva d
 6. Foer inn i `${AUTO_XSALE_ROOT}/_delegert-rapport.md`: saksnummer, hva du gjorde, og hvilket
    kriterium som avgjorde. En linje per sak.
 
-Bruk `dry_run=True` forst naar du er usikker paa formatering eller mottaker. Les `mottaker_kilde`
-i svaret fra `reply_to_customer` for du sender — adressen kan komme fra kundekortet og ikke fra
-korrespondansen paa saken.
+Bruk `dry_run=True` forst naar du er usikker paa formatering eller mottaker.
+
+**Mottakeren kan du la `reply_to_customer` utlede.** Regelen er at kontaktpersonens e-post er
+den autoritative, og kundekortet er reserven naar kontakten mangler e-post. Vaare egne
+adresser velges aldri. Les `mottaker_kilde` og `mottaker_utledet` i svaret uansett.
+
+Er den som sist skrev inn en **annen** enn kontaktpersonen, sender verktoyet ingenting og
+melder konflikt i stedet. Da skal du la saken staa — ikke velge selv. To plausible mottakere
+er nettopp et tilfelle der et menneske maa avgjore.
 
 ## Naar en sak kvalifiserer for aa loses alene
 
