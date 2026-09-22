@@ -9,6 +9,24 @@ rekker, og hvem som leser dem for kunden gjor det.
 | **Samtale**, utkastmodus | `CLAUDE.md` | `les` eller `kommenter` | filer paa disk |
 | **Samtale**, delegert | `auto-xsale-delegert.md` | `svar` eller `full` | handlinger i XSALE |
 
+## Slash-kommandoene
+
+I en samtale er det enklest aa bruke skills framfor aa huske aa peke paa en
+promptfil:
+
+| Kommando | Modus | Gjor |
+|---|---|---|
+| `/sak 48556` | utkastmodus | undersoker, kommenterer, skriver utkast du sender |
+| `/delegert` | delegert | leser kriteriene og spor hvilket nivaa du gir meg |
+
+Kilden ligger i `skills\` i settet, og `install.ps1` kopierer dem til
+`.claude\skills\`. Kopien skrives over ved hver installasjon - settet er
+kilden. Har du endret en skill lokalt, foer endringen tilbake til settet.
+
+`/delegert` dupliserer ikke `auto-xsale-delegert.md`; den viser til den.
+
+## Om promptfilene
+
 Det er bare to promptfiler her, og det er med vilje. `auto-xsale-saksassistent.md`
 lastes **kun** av `scripts\run-auto-xsale.ps1`; i en samtale laster ingenting den.
 Utkastmodus trenger ingen egen prompt fordi reglene alt staar i `CLAUDE.md` — en

@@ -184,6 +184,29 @@ if (-not (Test-Path -LiteralPath $projectMcp)) {
 
 # --- CLAUDE.md --------------------------------------------------------------
 Trinn "Arbeidsinstruksjoner"
+# --- Skills -----------------------------------------------------------------
+#  Slash-kommandoene /sak og /delegert. Kilden ligger i settet under skills\,
+#  og kopieres hit ved hver installasjon.
+#
+#  Kopien skrives over med vilje. Settet er kilden - har noen endret en skill
+#  lokalt, skal endringen tilbake til settet framfor aa overleve som en lokal
+#  variant ingen vet om. Det var slik app\ divergerte fra sin egen arbeidskopi.
+$skillsKilde = Join-Path $script:KitRoot "skills"
+if (Test-Path -LiteralPath $skillsKilde) {
+    $skillsMaal = Join-Path $ProjectRoot ".claude\skills"
+    New-Item -ItemType Directory -Force -Path $skillsMaal | Out-Null
+    $antall = 0
+    foreach ($d in (Get-ChildItem -LiteralPath $skillsKilde -Directory)) {
+        $fra = Join-Path $d.FullName "SKILL.md"
+        if (-not (Test-Path -LiteralPath $fra)) { continue }
+        $til = Join-Path $skillsMaal $d.Name
+        New-Item -ItemType Directory -Force -Path $til | Out-Null
+        Copy-Item -LiteralPath $fra -Destination (Join-Path $til "SKILL.md") -Force
+        $antall++
+    }
+    Write-Host "  Installerte $antall skills i .claude\skills"
+}
+
 $projectClaude = Join-Path $ProjectRoot "CLAUDE.md"
 if (-not (Test-Path -LiteralPath $projectClaude)) {
     # Fornavnet er ikke oppgitt enna - oppsett.ps1 sporr om det etterpa og
