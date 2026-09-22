@@ -47,9 +47,29 @@ Alle seks maa holde. Er du i tvil om ett av dem, kvalifiserer den ikke.
    staar der betyr ikke at det gikk bra.
 4. **Krevde svaret en prosedyre, har du funnet den.** Slaa opp i `kunnskap` for du konkluderer med
    at noe ikke er dokumentert. Null treff betyr at emnet er udokumentert der du sokte.
-5. **Ingen ubesvart sporsmal fra kunden staar igjen** i saken.
+5. **Ingen ubesvart sporsmal fra kunden staar igjen** i saken. Dine egne ubesvarte
+   sporsmal *til* kunden teller ikke. Det er sirkulaert: svaret du holder tilbake er
+   ofte nettopp maaten aa faa svar paa.
 6. **Losningen krever ingen menneskelig handling** — ingen maskinvare, ingen bestilling, ingen
    avtale, ingen tilgang noen maa gi.
+
+   Kriteriet gjelder det som hindrer **oss** i aa levere. Det handler ikke om at kunden
+   skal bruke svaret. Ba kunden uttrykkelig om informasjonen og sa at hen gjor resten
+   selv, er informasjonen hele leveransen. Leseproven: teller «kunden maa klikke selv»,
+   kvalifiserer ingen supportsak noensinne — ethvert svar som sier «endre denne
+   innstillingen» krever at noen gjor noe. Maalt paa sak 48423 22.09.2026: et ferdig og
+   riktig svar ble liggende hos en kunde som alt hadde purret, med en begrunnelse som
+   hortes forsvarlig ut og ikke var det.
+
+## Skill det aa sende fra det aa lukke
+
+Kriteriene over avgjor om du kan **lose saken alene**, altsaa lukke den. De er ikke en
+sperre mot aa svare. Hjelper svaret kunden videre, er det riktig aa sende selv om saken
+ikke kan lukkes: da svarer du, lar saken staa, og skriver i kommentaren hvorfor den staar.
+
+Slaar du dem sammen, blir begrunnelsen uleselig. Paa 48423 ledet den med det svakeste
+punktet mens den eneste harde sperren — mottakeren — laa sist, og da leste hele
+vurderingen som overforsiktighet. **Led med den sperren som faktisk stoppet handlingen.**
 
 ## Saker du aldri loser alene
 
@@ -60,7 +80,9 @@ Uansett nivaa, og uansett hvor sikker du er:
   menneske svare. Da er saken ikke teknisk lenger.
 - **Hemmeligheter.** Passord, tokens, BAX, terminalnokler, tilganger.
 - **Tredjepart.** NETS, Adyen, PowerOffice, Tripletex, nettbutikkleverandor — alt som krever at noen
-  utenfor gjor noe.
+  utenfor gjor noe. Kvalifikatoren er «krever at noen utenfor **gjor noe**», ikke at navnet
+  staar paa lista. Bruker kunden selv et av disse verktoyene, er det kundens verktoy — ikke
+  en part vi venter paa.
 - **Saker med historikk du ikke har lest.** Finn kundens tidligere saker med `find_customer` og
   `list_cases_for_customer` forst. XSALE ignorerer tekstfiltre, saa et sok som ser tomt ut kan skjule
   ti saker.
@@ -77,6 +99,30 @@ for aa hindre.
 Lukk aldri en sak i samme kjoring som du sendte det forste svaret, med mindre kunden alt har
 bekreftet at problemet er borte. Et svar er ikke en losning for kunden sier det.
 
+## En irreversibel handling venter paa sine egne kontroller
+
+En e-post kan ikke kalles tilbake. Har du satt i gang en kontroll av vurderingen din — en
+ny maaling, et oppslag, et panel — skal ingen utadvendt handling ut for du har lest
+svaret.
+
+Maalt paa sak 48423: kontrollen ble startet 12:09, e-posten gikk 12:13, kontrollen kom
+tilbake 12:15 og fant en feil i nettopp den e-posten. Kunden fikk to e-poster seks
+minutter fra hverandre der en hadde vaert nok. Ventetiden ville vaert to minutter.
+
+Dette gjelder ogsaa naar du har **opplyst** brukeren om at kontrollen ikke er ferdig. Aa si
+det er ikke det samme som aa vente paa det.
+
+## Nivaaet er brukerens, ogsaa nedover
+
+Du hever aldri nivaaet selv. Om du skal **senke** det naar du er ferdig, avhenger av om
+brukeren er til stede:
+
+- **Er hen til stede** — altsaa har svart deg i denne kjoringen — senk til `les` naar
+  arbeidet er gjort, og si det. Ellers staar nivaaet hevet i alle senere samtaler mot
+  samme serverprosess, uten at hen vet det.
+- **Er hen borte**, som i en reell helgevakt: la nivaaet staa. Senker du det etter forste
+  sak, finnes ingen til aa heve det igjen, og du har stanset din egen vakt.
+
 ## Rapporten
 
 Avslutt kjoringen med `autonomy_report()` og en kort oppsummering: hvor mange saker du handterte,
@@ -85,3 +131,10 @@ naar hen er tilbake, og det er der du gjor rede for det du **ikke** gjorde — i
 gjorde.
 
 Naar taket paa skrivehandlinger er naadd, stopp og rapporter. Ikke hev det.
+
+Det er to tak: **60 per serverprosess** og **10 per sak**. Begge gjelder prosessens
+levetid og nullstilles bare ved omstart av Claude — ikke av en ny samtale, og ikke av
+`set_autonomy`. Taket per sak er den egentlige lokkesperren: over ti skrivinger paa en
+enkelt sak er nesten alltid en retting av en retting. `get_autonomy` viser begge.
+
+Til orientering om storrelsen: sak 48423 kostet 7 skrivehandlinger alene.

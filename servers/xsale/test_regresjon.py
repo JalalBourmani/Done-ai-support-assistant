@@ -99,6 +99,7 @@ def nullstill_autonomi(tmp_path, monkeypatch):
     """Hver test starter pa 'les' med tom revisjonslogg."""
     monkeypatch.setattr(X, "_autonomy", None)
     monkeypatch.setattr(X, "_actions_done", 0)
+    monkeypatch.setattr(X, "_actions_per_case", {})
     monkeypatch.setattr(X, "_cases_read", set())
     monkeypatch.setattr(X, "AUDIT_LOG", str(tmp_path / "audit.log"))
     monkeypatch.delenv("XSALE_AUTONOMY", raising=False)
@@ -144,6 +145,70 @@ def test_handlingstaket_stopper_lokken():
     X._actions_done = X.MAX_AUTONOMOUS_ACTIONS
     svar = json.loads(X._krev_nivaa("add_case_comment", "kommenter", 48423))
     assert svar["arsak"] == "handlingstak"
+
+
+def test_taket_per_sak_stopper_retting_av_retting():
+    """Sak 48423 kostet 7 skrivehandlinger i en enkelt kjoring - tre av dem
+    rettinger av samme kommentar. Over ti paa en sak er en lokke, og det er
+    den sperren som faktisk fanger den. Det globale taket pa 60 gjor det
+    ikke: der ville lokken fatt lov til a spise atte sakers budsjett forst."""
+    X.set_autonomy("full", "test")
+    X._mark_case_read(48423)
+    for _ in range(X.MAX_ACTIONS_PER_CASE):
+        assert X._krev_nivaa("add_case_comment", "kommenter", 48423) is None
+        X._tell_handling(48423)
+    svar = json.loads(X._krev_nivaa("add_case_comment", "kommenter", 48423))
+    assert svar["arsak"] == "handlingstak_per_sak"
+    assert svar["handlinger_paa_saken"] == X.MAX_ACTIONS_PER_CASE
+
+
+def test_taket_per_sak_rammer_ikke_naboen():
+    """Sperren skal stoppe lokken pa EN sak, ikke stanse hele helgevakten."""
+    X.set_autonomy("full", "test")
+    X._mark_case_read(48423)
+    X._mark_case_read(48556)
+    for _ in range(X.MAX_ACTIONS_PER_CASE):
+        X._tell_handling(48423)
+    assert json.loads(
+        X._krev_nivaa("add_case_comment", "kommenter", 48423)
+    )["arsak"] == "handlingstak_per_sak"
+    assert X._krev_nivaa("add_case_comment", "kommenter", 48556) is None
+
+
+def test_tell_handling_oker_begge_tellerne():
+    """Kallstedene kaller _tell_handling(), ikke to linjer hver. En regel som
+    ma gjentas pa hvert kallsted blir brutt pa det femte - slik fire verktoy
+    havnet under mcp.run() uten a bli servert."""
+    X._tell_handling(48423)
+    X._tell_handling(48423)
+    X._tell_handling(48556)
+    assert X._actions_done == 3
+    assert X._actions_per_case[48423] == 2
+    assert X._actions_per_case[48556] == 1
+
+
+def test_tell_handling_takler_sak_uten_nummer():
+    X._tell_handling(None)
+    assert X._actions_done == 1
+    assert X._actions_per_case == {}
+
+
+def test_det_globale_taket_romme_en_helgevakt():
+    """Malt: en reell sak kostet 7 skrivehandlinger. Et tak pa 20 ga ~2-3
+    saker per serverprosess, og telleren nullstilles ikke av en ny samtale.
+    Taket skal stoppe en lopsk lokke, ikke en normal helg."""
+    assert X.MAX_AUTONOMOUS_ACTIONS >= 7 * 8
+    assert X.MAX_ACTIONS_PER_CASE < X.MAX_AUTONOMOUS_ACTIONS
+
+
+def test_get_autonomy_viser_begge_takene():
+    """Ser man bare det globale tallet, ser en sak som er i ferd med a bli
+    lopsk identisk ut med en normal dag."""
+    X._tell_handling(48423)
+    r = json.loads(X.get_autonomy())
+    assert r["tak_per_kjoring"] == X.MAX_AUTONOMOUS_ACTIONS
+    assert r["tak_per_sak"] == X.MAX_ACTIONS_PER_CASE
+    assert r["handlinger_per_sak"] == {"48423": 1}
 
 
 def test_ukjent_nivaa_avvises():
@@ -655,3 +720,135 @@ def test_blokkluft_gir_ikke_trippel_br():
     """Fiksen skal ikke bytte for lite luft med for mye."""
     ut = X._markdown_to_xsale_html("- ett\n\nTekst.\n\n- to")
     assert "<br><br><br>" not in ut
+
+
+# --- Mottakerregelen ------------------------------------------------------
+#
+# Jalals regel 22.09.2026: kontaktpersonens e-post er den autoritative
+# mottakeren; kundekortet er reserven når kontakten mangler e-post.
+#
+# Bekreftet empirisk på sak 48661, der de to har ULIKE domener
+# (albatrossfitness.no mot albatrossenter.no) og kollegaen sendte til
+# kontaktpersonen.
+#
+# Regelen så riktig ut på 48661 og var brukket på tre av fem reelle saker:
+# «siste innkommende» ble support@plorea.com, altså oss selv, fordi interne
+# varselkopier av vår egen utgående post klassifiseres som innkommende.
+
+def _stub_sak(monkeypatch, kontakt_epost=None, kundekort=None,
+              innkommende=None, contact_id=7):
+    """Stubber de to oppslagene _case_epostadresser gjør."""
+    kontakter = []
+    if contact_id:
+        kontakter.append({"id": contact_id, "firstname": "Kari",
+                          "lastname": "Kunde", "email": kontakt_epost or ""})
+    detalj = {
+        "contactId": contact_id,
+        "customer": {"email": kundekort or "", "contacts": kontakter},
+        "replyTo": {"email": "support+1@plorea.inbound.xsale.no"},
+        "inboundEmail": [],
+    }
+    poster = [{"id": 1, "direction": "inbound_or_notice", "sender": s,
+               "receiver": "support@plorea.com", "subject": "x"}
+              for s in (innkommende or [])]
+    monkeypatch.setattr(X, "get_case_details",
+                        lambda cid: json.dumps(detalj))
+    monkeypatch.setattr(X, "get_case_emails",
+                        lambda sn, include_bodies=True: json.dumps(
+                            {"emails": poster}))
+    monkeypatch.setattr(X, "_egne_domener_cache", {"plorea.com", "amendo.no"})
+
+
+def test_kontaktperson_slaar_kundekortet(monkeypatch):
+    _stub_sak(monkeypatch, kontakt_epost="kari@kunde.no",
+              kundekort="gammel@annetdomene.no")
+    adr, kilde, konflikt = X._anbefalt_mottaker(1, 1)
+    assert adr == "kari@kunde.no"
+    assert kilde == "kontaktperson"
+    assert konflikt is None
+
+
+def test_kundekortet_brukes_naar_kontakten_mangler_epost(monkeypatch):
+    """Jalals regel: mangler kontakten e-post, kan kundekortet benyttes."""
+    _stub_sak(monkeypatch, kontakt_epost="", kundekort="post@kunde.no")
+    adr, kilde, _ = X._anbefalt_mottaker(1, 1)
+    assert adr == "post@kunde.no"
+    assert kilde == "kundekortet"
+
+
+def test_kundekortet_brukes_naar_ingen_kontakt_er_satt(monkeypatch):
+    _stub_sak(monkeypatch, kundekort="post@kunde.no", contact_id=None)
+    adr, kilde, _ = X._anbefalt_mottaker(1, 1)
+    assert adr == "post@kunde.no"
+    assert kilde == "kundekortet"
+
+
+def test_egen_adresse_blir_aldri_mottaker(monkeypatch):
+    """Uten dette ble support@plorea.com valgt som mottaker på sak 48638."""
+    _stub_sak(monkeypatch, kontakt_epost="", kundekort="",
+              innkommende=["support@plorea.com", "jalal@plorea.com"],
+              contact_id=None)
+    adr, kilde, konflikt = X._anbefalt_mottaker(1, 1)
+    assert adr is None, (adr, kilde)
+    assert konflikt
+
+
+def test_egen_utgaaende_kopi_gir_ikke_falsk_konflikt(monkeypatch):
+    """Interne varselkopier kom tilbake som «innkommende» og utløste konflikt
+    på tre av fem reelle saker."""
+    _stub_sak(monkeypatch, kontakt_epost="kari@kunde.no",
+              kundekort="kari@kunde.no",
+              innkommende=["support@plorea.com"])
+    adr, kilde, konflikt = X._anbefalt_mottaker(1, 1)
+    assert adr == "kari@kunde.no"
+    assert konflikt is None, konflikt
+
+
+def test_ekte_ekstern_avsender_gir_konflikt(monkeypatch):
+    """Skrev en ANNEN enn kontaktpersonen inn sist, skal koden si fra."""
+    _stub_sak(monkeypatch, kontakt_epost="kari@kunde.no",
+              kundekort="kari@kunde.no",
+              innkommende=["kollega@kunde.no"])
+    adr, kilde, konflikt = X._anbefalt_mottaker(1, 1)
+    assert kilde == "kontaktperson"
+    assert konflikt and "kollega@kunde.no" in konflikt
+
+
+@pytest.mark.parametrize("adresse,egen", [
+    ("support@plorea.com", True),
+    ("jalal@plorea.com", True),
+    ("louise.lagergren@amendo.no", True),
+    ("noreply@kunde.no", True),
+    ("kari@kunde.no", False),
+    ("ingunn@albatrossfitness.no", False),
+])
+def test_gjenkjenner_egne_adresser(monkeypatch, adresse, egen):
+    monkeypatch.setattr(X, "_egne_domener_cache",
+                        {"plorea.com", "amendo.no", "done.ai"})
+    assert X._er_egen_adresse(adresse) is egen
+
+
+def test_prioriteten_er_uttalt():
+    """Rekkefølgen lå tidligere implisitt i hvilken kilde som ble lest først."""
+    assert X.MOTTAKER_PRIORITET[0] == "kontaktperson"
+    assert "kundekortet" in X.MOTTAKER_PRIORITET
+    assert X.MOTTAKER_PRIORITET.index("kontaktperson") < \
+        X.MOTTAKER_PRIORITET.index("kundekortet")
+    assert "oss" not in X.MOTTAKER_PRIORITET
+
+
+def test_epostpayload_setter_replyto_naar_den_er_oppgitt():
+    """Uten replyTo satte XSALE Reply-To til support@plorea.com, og kundens
+    svar ville landet i den generelle innboksen uten kobling til saken.
+    Målt 22.09.2026, og verifisert ved å sende feltet."""
+    p = X._bygg_epost_payload(
+        2994021, "Emne", "<p>Hei</p>", "kunde@eksempel.no",
+        reply_to="support+48638@plorea.inbound.xsale.no")
+    assert p["replyTo"] == "support+48638@plorea.inbound.xsale.no"
+
+
+def test_epostpayload_utelater_tom_replyto():
+    p = X._bygg_epost_payload(1, "E", "<p>x</p>", "a@b.no", reply_to="")
+    assert "replyTo" not in p
+    p2 = X._bygg_epost_payload(1, "E", "<p>x</p>", "a@b.no")
+    assert "replyTo" not in p2

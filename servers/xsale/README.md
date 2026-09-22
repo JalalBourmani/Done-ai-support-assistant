@@ -45,7 +45,8 @@ MCP-server mot XSALE CRM. Gir tilgang til saker, kommunikasjon, kundekort og ord
 | `autonomy_report` | Rapport fra revisjonsloggen — utført og avvist |
 
 Fire nivåer: `les` (standard), `kommenter`, `svar`, `full`. Utover nivået gjelder
-tre sperrer: tak på 20 skrivehandlinger per kjøring, ingen skriving til en sak
+tre sperrer: to tak (60 skrivehandlinger per serverprosess, 10 per sak),
+ingen skriving til en sak
 som ikke er lest i samme kjøring, og revisjonslogg i `autonomy_audit.log`.
 
 Varig nivå settes med `XSALE_AUTONOMY` i `config.env`.

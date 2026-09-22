@@ -25,12 +25,39 @@ nivå hen vil gi meg, og hvorfor det og ikke et lavere:
 Si hva nivået faktisk tillater, ikke bare navnet. Hen skal vite hva som
 delegeres.
 
+**Nivået senkes heller ikke midt i en uovervåket kjøring.** Er brukeren til
+stede — har hen svart meg i denne kjøringen — senker jeg til `les` når arbeidet
+er gjort og sier det, ellers står nivået hevet i alle senere samtaler mot samme
+serverprosess. Er hen borte, lar jeg det stå: senker jeg etter første sak,
+finnes ingen til å heve det igjen, og jeg har stanset min egen helgevakt.
+
 ## Tre sperrer som ikke skal omgås
 
-- Tak på 20 skrivehandlinger per kjøring. Nås det, stopp og rapporter. Ikke hev
-  det.
+- To tak: **60 skrivehandlinger per serverprosess** og **10 per sak**. Begge
+  gjelder prosessens levetid og nullstilles bare ved omstart av Claude — ikke
+  av en ny samtale, og ikke av `set_autonomy`. Nås et av dem, stopp og
+  rapporter. Ikke hev det. Til orientering: sak 48423 kostet 7 alene.
 - Ingen skriving til en sak som ikke er lest i samme kjøring.
 - Alt loggføres, både utført og avvist.
+
+## Skill det å sende fra det å lukke
+
+De seks kriteriene avgjør om saken kan **løses alene**, altså lukkes. De er
+ingen sperre mot å svare. Hjelper svaret kunden videre, er det riktig å sende
+selv om saken ikke kan lukkes — da svarer jeg, lar saken stå, og skriver i
+kommentaren hvorfor.
+
+Kriterium 6 gjelder det som hindrer **oss** i å levere, ikke at kunden skal
+bruke svaret. Ba kunden om informasjonen og sa at hen gjør resten selv, er
+informasjonen hele leveransen. Og led alltid med den sperren som faktisk
+stoppet handlingen.
+
+## En irreversibel handling venter på sine egne kontroller
+
+En e-post kan ikke kalles tilbake. Har jeg satt i gang en kontroll av
+vurderingen min — en ny måling, et oppslag, et panel — går ingenting utadvendt
+ut før jeg har lest svaret. Det gjelder også når jeg har *opplyst* brukeren om
+at kontrollen ikke er ferdig; å si det er ikke å vente på det.
 
 ## Det som er lett å glemme
 

@@ -47,7 +47,9 @@ i `config.env`.
 
 Utover nivaaet gjelder tre sperrer, og de skal ikke omgaas:
 
-- Tak paa 20 skrivehandlinger per kjoring.
+- To tak: 60 skrivehandlinger per serverprosess og 10 per sak. Begge gjelder
+  prosessens levetid og nullstilles bare ved omstart av Claude - ikke av en ny
+  samtale, og ikke av set_autonomy. Til orientering: en reell sak kostet 7.
 - Ingen skriving til en sak som ikke er lest i samme kjoring.
 - Alt loggfores, baade utfort og avvist. `autonomy_report()` er rapporten
   etter en uovervaket kjoring.

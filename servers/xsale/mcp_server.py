@@ -1514,14 +1514,40 @@ AUTONOMY_DESC = {
     "full": "også lukking - helautonomt",
 }
 DEFAULT_AUTONOMY = "les"
-MAX_AUTONOMOUS_ACTIONS = 20
+
+# Taket finnes for aa stoppe en loepsk loekke, ikke for aa begrense en normal
+# arbeidsdag. Maalt 22.09.2026 paa sak 48423: EN reell sak kostet 7
+# skrivehandlinger (kommentar, tre rettinger av den, to svar, ett til). Et
+# globalt tak paa 20 ga altsaa ~2-3 saker per serverprosess, og tellerne
+# nullstilles aldri i prosessens levetid.
+#
+# En loekke er alltid en loekke paa NOE. Derfor er taket per sak den presise
+# sperren, og det globale kan vaere romslig nok til en helgevakt.
+MAX_AUTONOMOUS_ACTIONS = 60      # per serverprosess (~8 saker)
+MAX_ACTIONS_PER_CASE = 10        # per sak, samme prosess
 
 AUDIT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "autonomy_audit.log")
 
 _autonomy = None
 _actions_done = 0
+_actions_per_case = {}
 _cases_read = set()
+
+
+def _tell_handling(serial):
+    """Oeker begge tellerne. Alle skrivende verktoey skal kalle DENNE.
+
+    Grunnen til at det er en funksjon og ikke to linjer paa hvert kallsted:
+    et nytt skrivende verktoey kan ikke glemme den ene telleren. Det var
+    nettopp slik fire verktoey havnet under mcp.run() uten aa bli servert -
+    en regel som maa gjentas paa hvert kallsted blir brutt paa det femte.
+    """
+    global _actions_done
+    _actions_done += 1
+    if serial is not None:
+        n = int(serial)
+        _actions_per_case[n] = _actions_per_case.get(n, 0) + 1
 
 
 def autonomy():
@@ -1583,11 +1609,33 @@ def _krev_nivaa(handling, kreves, serial):
             "utfort": False,
             "arsak": "handlingstak",
             "forklaring": (
-                "Taket på %d skrivehandlinger per kjøring er nådd. Det er en "
-                "sperre mot at en løkke spiser køen. Start en ny kjøring, "
-                "eller hev MAX_AUTONOMOUS_ACTIONS bevisst."
+                "Taket på %d skrivehandlinger er nådd. Telleren gjelder hele "
+                "levetiden til MCP-serverprosessen og nullstilles IKKE av en "
+                "ny samtale eller av set_autonomy - bare av en omstart av "
+                "serveren, altså av Claude. Stopp og rapporter det som er "
+                "gjort; ikke hev taket for å komme videre."
                 % MAX_AUTONOMOUS_ACTIONS),
+            "handlinger_utfort": _actions_done,
         }, indent=2, ensure_ascii=False)
+
+    if serial is not None:
+        brukt = _actions_per_case.get(int(serial), 0)
+        if brukt >= MAX_ACTIONS_PER_CASE:
+            _audit(handling + ":TAK_SAK", serial,
+                   "%d handlinger paa saken" % brukt)
+            return json.dumps({
+                "utfort": False,
+                "arsak": "handlingstak_per_sak",
+                "forklaring": (
+                    "Sak %s har alt fått %d skrivehandlinger i denne "
+                    "prosessen, og taket per sak er %d. Så mange skrivinger "
+                    "på én sak er nesten alltid en løkke eller en retting av "
+                    "en retting - les saken og legg fram funnet i stedet. "
+                    "Taket nullstilles ikke; en sak som virkelig trenger mer, "
+                    "trenger et menneske."
+                    % (serial, brukt, MAX_ACTIONS_PER_CASE)),
+                "handlinger_paa_saken": brukt,
+            }, indent=2, ensure_ascii=False)
 
     if serial is not None and int(serial) not in _cases_read:
         _audit(handling + ":ULEST", serial, "saken er ikke lest i kjoringen")
@@ -1612,6 +1660,11 @@ def get_autonomy() -> str:
         "nivaaer": AUTONOMY_DESC,
         "handlinger_utfort_denne_kjoringen": _actions_done,
         "tak_per_kjoring": MAX_AUTONOMOUS_ACTIONS,
+        "tak_per_sak": MAX_ACTIONS_PER_CASE,
+        "handlinger_per_sak": {str(k): v
+                               for k, v in sorted(_actions_per_case.items())},
+        "merknad_tak": ("Tellerne gjelder serverprosessens levetid og "
+                        "nullstilles bare ved omstart av Claude."),
         "saker_lest_denne_kjoringen": sorted(_cases_read),
         "revisjonslogg": AUDIT_LOG,
     }, indent=2, ensure_ascii=False)
@@ -2680,8 +2733,7 @@ def add_case_comment(serial_number: int, note: str, raw_html: bool = False) -> s
                                        or rel.get("author") or {})
             break
 
-    global _actions_done
-    _actions_done += 1
+    _tell_handling(serial_number)
     varsel = _norskvarsel(note)
     _audit("add_case_comment", serial_number,
            "verifisert=%s, %d tegn%s"
@@ -3019,8 +3071,7 @@ def edit_case_comment(serial_number: int, comment_id: int, note: str,
             landed = (rel.get("note") or "") == ny_html
             break
 
-    global _actions_done
-    _actions_done += 1
+    _tell_handling(serial_number)
     varsel = _norskvarsel(note)
     _audit("edit_case_comment", serial_number,
            "kommentar %s, verifisert=%s%s"
@@ -3274,8 +3325,7 @@ def reply_to_customer(serial_number: int, body: str, receiver: str = "",
     except Exception:
         pass
 
-    global _actions_done
-    _actions_done += 1
+    _tell_handling(serial_number)
     _audit("reply_to_customer", serial_number,
            "til=%s, verifisert=%s, %d tegn" % (mottaker, landed, len(body)))
 
@@ -3446,8 +3496,7 @@ def set_case_status(serial_number: int, status: str, comment: str = "",
                if forut.get(k) not in (None, "", [], {})
                and etter.get(k) in (None, "", [], {})]
 
-    global _actions_done
-    _actions_done += 1
+    _tell_handling(serial_number)
     _audit("set_case_status", serial_number,
            "%s -> %s, lest tilbake %s, uventet %s"
            % (fra, st, etter.get("status"), uventet or "ingen"))
