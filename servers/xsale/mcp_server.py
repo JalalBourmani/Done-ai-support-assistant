@@ -57,9 +57,13 @@ def _get_session():
         "_email": email,
         "_password": password,
     }
+    # XSALE checks Origin/Referer on login since ~15.10.2026 and answers
+    # "Ugyldig CSRF token" without them. The form's _csrf_token is only a
+    # placeholder ("csrf-token") — the browser sends these headers for free.
     login_resp = sess.post(
         f"{base_url}/user/login",
         data=login_data,
+        headers={"Origin": base_url, "Referer": f"{base_url}/user/login"},
         timeout=15,
         allow_redirects=True,
     )
